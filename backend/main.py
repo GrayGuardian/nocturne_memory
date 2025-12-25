@@ -10,6 +10,14 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时
     print("Knowledge Graph API starting...")
+    # 尝试自动初始化数据库（如果为空）
+    try:
+        from db import get_neo4j_client
+        client = get_neo4j_client()
+        client.initialize_db_if_empty()
+    except Exception as e:
+        print(f"Failed to auto-initialize DB: {e}")
+    
     yield
     # 关闭时
     print("Closing Neo4j connection...")

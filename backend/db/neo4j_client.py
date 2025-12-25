@@ -26,6 +26,7 @@ ALLOWED_NODE_TYPES = {
 RESERVED_ENTITY_IDS = {"states"}
 
 
+
 class Neo4jClient:
     def __init__(self, uri: str, user: str, password: str):
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
@@ -33,6 +34,27 @@ class Neo4jClient:
 
     def close(self):
         self.driver.close()
+
+    def initialize_db_if_empty(self):
+        """如果数据库为空，则插入初始化数据。解决 Warning 并提升新用户体验。"""
+        with self.driver.session() as session:
+            # 1. 检查是否存在任何 Entity 节点
+            result = session.run("MATCH (e:Entity) RETURN count(e) as cnt")
+            count = result.single()["cnt"]
+            
+            if count == 0:
+                print(">>> WARNING: 数据库为空。正在初始化示例数据...")
+                try:
+                    from .seed_data import insert_demo_data_via_client
+                    # 2. 通过业务方法写入示例数据（保证 ID 格式一致）
+                    insert_demo_data_via_client(self)
+                    print(">>> 初始化完成: 已创建示例节点。")
+                except Exception as e:
+                    import traceback
+                    print(f">>> 初始化警告: 写入示例数据失败: {e}")
+                    traceback.print_exc()
+
+    # _insert_initial_data 已移除，逻辑迁移至 seed_data.py
 
     def _ensure_constraints(self):
         """确保数据库约束存在"""
