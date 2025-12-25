@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" style="font-family: 'Segoe UI', Roboto, sans-serif; background-color: #0d1117;">
+  <!-- Background Grid -->
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#21262d" stroke-width="1"/>
+    </pattern>
+    <marker id="arrowhead-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#58a6ff" />
+    </marker>
+    <marker id="arrowhead-purple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#d2a8ff" />
+    </marker>
+  </defs>
+  <rect width="800" height="400" fill="url(#grid)" />
+
+  <!-- Main Container Title -->
+  <text x="400" y="40" text-anchor="middle" fill="#58a6ff" font-size="20" font-weight="bold" letter-spacing="2">NOCTURNE MEMORY SYSTEM</text>
+
+  <!-- ======================== CENTER: BACKEND CORE ======================== -->
+  <g transform="translate(300, 100)">
+    <!-- Glow effect -->
+    <rect width="200" height="220" rx="10" fill="none" stroke="#238636" stroke-width="2" filter="drop-shadow(0 0 8px #238636)" />
+    <rect width="200" height="220" rx="10" fill="#161b22" stroke="#30363d" stroke-width="2" />
+    <!-- Header Strip -->
+    <path d="M0 10 Q0 0 10 0 L190 0 Q200 0 200 10 L200 40 L0 40 Z" fill="#238636" stroke="#30363d" />
+    
+    <text x="100" y="30" text-anchor="middle" fill="#ffffff" font-weight="bold">Backend Core</text>
+    
+    <text x="20" y="80" fill="#c9d1d9" font-size="14">⚡ FastAPI (REST)</text>
+    <text x="20" y="110" fill="#c9d1d9" font-size="14">📦 Neo4j (Graph DB)</text>
+    <line x1="20" y1="130" x2="180" y2="130" stroke="#30363d" />
+    
+    <text x="20" y="155" fill="#8b949e" font-size="12">Single Source of Truth</text>
+    <text x="20" y="175" fill="#8b949e" font-size="12">Version Control Manager</text>
+    <text x="20" y="195" fill="#8b949e" font-size="12">Snapshot Engine</text>
+  </g>
+
+  <!-- ======================== LEFT: AI INTERFACE ======================== -->
+  <g transform="translate(40, 120)">
+    <rect width="180" height="180" rx="10" fill="#161b22" stroke="#58a6ff" stroke-width="2" />
+    <text x="90" y="30" text-anchor="middle" fill="#a5d6ff" font-weight="bold">AI Interface (MCP)</text>
+    
+    <text x="20" y="60" fill="#c9d1d9" font-size="14">🤖 For Agents</text>
+    <text x="20" y="80" fill="#8b949e" font-size="11">Antigravity / Claude / etc</text>
+    
+    <rect x="20" y="95" width="140" height="1" fill="#30363d" />
+    
+    <text x="15" y="120" fill="#79c0ff" font-size="11" font-family="monospace">read_resource()</text>
+    <text x="15" y="140" fill="#79c0ff" font-size="11" font-family="monospace">patch_resource()</text>
+    <text x="15" y="160" fill="#79c0ff" font-size="11" font-family="monospace">create_entity() ...</text>
+  </g>
+
+  <!-- ======================== RIGHT: HUMAN FRONTEND ======================== -->
+  <g transform="translate(580, 120)">
+    <rect width="180" height="180" rx="10" fill="#161b22" stroke="#d2a8ff" stroke-width="2" />
+    <text x="90" y="30" text-anchor="middle" fill="#d2a8ff" font-weight="bold">Human Frontend</text>
+    
+    <text x="20" y="60" fill="#c9d1d9" font-size="14">👩‍💻 For Humans</text>
+    <text x="20" y="80" fill="#8b949e" font-size="11">Web Dashboard (React)</text>
+    
+    <rect x="20" y="95" width="140" height="1" fill="#30363d" />
+    
+    <text x="20" y="120" fill="#ffa657" font-size="12">👁️ Review &amp; Audit</text>
+    <text x="20" y="140" fill="#ffa657" font-size="12">✏️ Manual Edit</text>
+    <text x="20" y="160" fill="#ffa657" font-size="12">🧹 Cleanup</text>
+  </g>
+
+  <!-- ======================== CONNECTORS ======================== -->
+  
+  <!-- AI <-> Center -->
+  <g transform="translate(225, 210)">
+    <!-- Outgoing to Core -->
+    <path d="M 0 -10 L 65 -10" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrowhead-blue)" />
+    <!-- Incoming from Core -->
+    <path d="M 75 10 L 10 10" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrowhead-blue)" />
+    
+    <text x="37" y="-18" text-anchor="middle" fill="#58a6ff" font-size="10">MCP/RPC</text>
+  </g>
+
+  <!-- Human <-> Center -->
+  <g transform="translate(505, 210)">
+    <!-- Outgoing to Core -->
+    <path d="M 75 -10 L 10 -10" stroke="#d2a8ff" stroke-width="2" marker-end="url(#arrowhead-purple)" />
+    <!-- Incoming from Core -->
+    <path d="M 0 10 L 65 10" stroke="#d2a8ff" stroke-width="2" marker-end="url(#arrowhead-purple)" />
+    
+    <text x="37" y="-18" text-anchor="middle" fill="#d2a8ff" font-size="10">HTTP/API</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="400" y="380" text-anchor="middle" fill="#8b949e" font-size="12">Nocturne Memory Architecture v1.1 - Centralized Core</text>
+</svg>
