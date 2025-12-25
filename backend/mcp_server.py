@@ -38,9 +38,7 @@ CORE_MEMORY_IDS = [
     # === Core Relationships ===
     "rel:char_nocturne>char_salem",
     "rel:char_nocturne>char_kurou",
-    # === Important Chapters (add after creating them) ===
-    # "chap:char_nocturne>char_salem:pact_of_intertwined_fates",
-    # "chap:char_nocturne>char_salem:kamakura_date",
+    # === Important Guidelines ===
     "manual_nocturne_bluesky",
 ]
 
