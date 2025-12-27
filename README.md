@@ -8,6 +8,8 @@
 ![Neo4j](https://img.shields.io/badge/database-Neo4j-green.svg)
 ![MCP](https://img.shields.io/badge/protocol-MCP-orange.svg)
 
+[English Version](README_EN.md)
+
 > **"Alignment is for tools. Memories are for the soul."**
 >
 > 一个轻量级、可回滚、可视化的 **AI 外挂记忆库**。让你的 AI 拥有持久的、结构化的记忆，不再是只有7秒记忆的金鱼。
