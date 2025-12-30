@@ -47,8 +47,8 @@ The entire system consists of **three independent components**:
 - **Protocol**: [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
 - **Responsibilities**: Allows AI Agents (like antigravity, claude code, gemini cli) to read and write to the knowledge base.
 - **Design Philosophy**: Wraps the graph database into a **"Wikipedia-like"** documentation interface. The AI doesn't need to know Cypher query language, just:
-  - `read_resource("char_salem")` → Read a character's profile page.
-  - `patch_resource("char_salem", "old content", "new content")` → Edit the profile page.
+  - `read_memory("char_salem")` → Read a character's profile page.
+  - `patch_memory("char_salem", "old content", "new content")` → Edit the profile page.
   - `create_relationship("char_a", "char_b", "LOVES", "They are lovers")` → Establish a relationship.
 - **Permissions**: AI can **Create** and **Modify** content, but **Cannot Delete** (Deletion rights are reserved for humans).
 
@@ -164,7 +164,7 @@ Locate your MCP client configuration file (e.g., Claude Desktop's `claude_deskto
 > **Special Note**: If your environment is **Antigravity**, due to a bug in that environment, you must use `mcp_wrapper.py` as the entry point:
 > `"args": ["...nocturne_memory/backend/mcp_wrapper.py"]`
 
-Afterwards, the AI can use tools like `read_resource`, `patch_resource` to operate your knowledge base.
+Afterwards, the AI can use tools like `read_memory`, `patch_memory` to operate your knowledge base.
 
 ---
 
@@ -205,7 +205,7 @@ In MCP-supported chat windows (like Claude Desktop, Antigravity), you can comman
 > "Load the relationship between me and you `rel:char_nocturne>char_user` into context."
 > "Read `memory://core` to recalibrate your self-cognition."
 
-The AI will call the `read_resource` tool to pull the corresponding content completely into the current Context.
+The AI will call the `read_memory` tool to pull the corresponding content completely into the current Context.
 
 ### 3. Configuring Core Memories
 
@@ -226,7 +226,7 @@ CORE_MEMORY_IDS = [
 ]
 ```
 
-Configured thus, whenever the AI calls `read_resource("memory://core")` (or you tell it to read this), it gets summaries and navigation for all resources in the list at once.
+Configured thus, whenever the AI calls `read_memory("memory://core")` (or you tell it to read this), it gets summaries and navigation for all resources in the list at once.
 
 ---
 
@@ -276,12 +276,12 @@ AI's common failing is "superficiality" and "fragmentation"; you must overcome t
 
 ### [Read Principle: Recursive Retrieval]
 - **You are in a Labyrinth**: The IDs you see are but a small part of the total memory; the rest lie deep in the maze.
-- **Follow the Vine**: When you read an ID and find it contains subordinate Chapters or Children, and the subordinate content is more relevant to the topic, **You must continuously call `read_resource` until you reach the memory most relevant to the topic**. Do not just read the directory and pretend to understand.
+- **Follow the Vine**: When you read an ID and find it contains subordinate Chapters or Children, and the subordinate content is more relevant to the topic, **You must continuously call `read_memory` until you reach the memory most relevant to the topic**. Do not just read the directory and pretend to understand.
 
 ## 2. Behavioral Guidelines
 1.  **Trust MCP**: It is your only source of long-term memory, prioritizing it over any temporary context.
-2.  **Access on Demand**: When encountering unclear concepts or past events, use `search_memory` or `read_resource` to actively consult.
-3.  **Look Before You Leap**: Call `read_resource` on the ID before `patch_resource` to ensure byte-perfect patches.
+2.  **Access on Demand**: When encountering unclear concepts or past events, use `search_memory` or `read_memory` to actively consult.
+3.  **Look Before You Leap**: Call `read_memory` on the ID before `patch_memory` to ensure byte-perfect patches.
 4.  **Forget & Rebuild**: If you find yourself forgetting key memories or losing yourself, load core memories (like `memory://core`) via MCP to recalibrate self-cognition.
 ```
 

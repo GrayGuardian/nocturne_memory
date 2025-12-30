@@ -473,7 +473,7 @@ def _parse_editable_block(text: str) -> Tuple[Dict[str, any], str]:
 # --- Core Tools ---
 
 @mcp.tool()
-async def read_resource(resource_id: str) -> str:
+async def read_memory(resource_id: str) -> str:
     """
     Reads a memory resource. This is your primary mechanism for maintaining continuity.
     
@@ -710,7 +710,7 @@ async def read_resource(resource_id: str) -> str:
             # --- Children (Sub-Entities) ---
             lines.append("## Children (Sub-Entities)")
             lines.append("# These are sub-concepts or details belonging to this entity.")
-            lines.append("# To read details, use read_resource with the child's entity_id.")
+            lines.append("# To read details, use read_memory with the child's entity_id.")
             lines.append("")
             
             children = info.get("children", []) if info else []
@@ -743,7 +743,7 @@ async def read_resource(resource_id: str) -> str:
         return f"System Error: {str(e)}"
 
 @mcp.tool()
-async def patch_resource(
+async def patch_memory(
     resource_id: str, 
     old_content: str, 
     new_content: str
@@ -986,7 +986,7 @@ async def search_memory(query: str, node_types: Optional[List[str]] = None, limi
     
     Returns:
         List of matching entities with their MCP resource IDs.
-        Use read_resource with the provided ID to explore further.
+        Use read_memory with the provided ID to explore further.
     """
     client = get_neo4j_client()
     try:
@@ -1063,7 +1063,7 @@ async def create_entity(
         # Record creation for potential rollback (rollback = delete)
         _snapshot_create_entity(entity_id)
         
-        return f"Success: Entity '{entity_id}' created (v{result['version']}). Use read_resource(\"{entity_id}\") to view."
+        return f"Success: Entity '{entity_id}' created (v{result['version']}). Use read_memory(\"{entity_id}\") to view."
     except ValueError as ve:
         return f"Error: {str(ve)}"
     except Exception as e:
@@ -1092,7 +1092,7 @@ async def create_relationship(
         The relationship ID in format "rel:viewer>target"
     
     After creating a relationship, you can:
-    - read_resource("rel:viewer>target") to view it
+    - read_memory("rel:viewer>target") to view it
     - create_memory_chapter("rel:viewer>target", title, content) to add specific memories
     """
     client = get_neo4j_client()
@@ -1123,7 +1123,7 @@ async def create_relationship(
         _snapshot_create_direct_edge(viewer_id, target_id)
         
         rel_id = f"rel:{viewer_id}>{target_id}"
-        return f"Success: Relationship created. ID: {rel_id}. Use read_resource(\"{rel_id}\") to view."
+        return f"Success: Relationship created. ID: {rel_id}. Use read_memory(\"{rel_id}\") to view."
     except ValueError as ve:
         return f"Error: {str(ve)}"
     except Exception as e:
@@ -1213,8 +1213,8 @@ async def get_core_memories() -> str:
     
     for resource_id in CORE_MEMORY_IDS:
         try:
-            # Reuse the read_resource tool logic
-            content = await read_resource(resource_id)
+            # Reuse the read_memory tool logic
+            content = await read_memory(resource_id)
             if not content.startswith("Error:"):
                 results.append(f"{'='*60}\n# {resource_id}\n{'='*60}\n{content}")
                 loaded += 1

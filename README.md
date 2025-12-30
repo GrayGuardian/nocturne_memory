@@ -48,8 +48,8 @@
 - **协议**：[Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
 - **职责**：让 AI Agent（如 antigravity, claude code, gemini cli 中的 AI）能够读写知识库。
 - **设计哲学**：把图数据库包装成 **"类似维基百科"** 的文档接口。AI 不需要懂 Cypher 查询语言，只需要：
-  - `read_resource("char_salem")` → 读取一个人物的资料页。
-  - `patch_resource("char_salem", "旧内容", "新内容")` → 编辑资料页。
+  - `read_memory("char_salem")` → 读取一个人物的资料页。
+  - `patch_memory("char_salem", "旧内容", "新内容")` → 编辑资料页。
   - `create_relationship("char_a", "char_b", "LOVES", "他们是恋人")` → 建立关系。
 - **权限**：AI 可以 **创建** 和 **修改** 内容，但 **不能删除**（删除权留给人类）。
 
@@ -166,7 +166,7 @@ npm run dev
 > **特别提示**：如果你的环境是 **Antigravity**，由于该环境存在 Bug，需要将入口改为 `mcp_wrapper.py` 才能正常使用：
 > `"args": ["...nocturne_memory/backend/mcp_wrapper.py"]`
 
-之后 AI 就可以通过 `read_resource`、`patch_resource` 等工具操作你的知识库了。
+之后 AI 就可以通过 `read_memory`、`patch_memory` 等工具操作你的知识库了。
 
 ---
 
@@ -207,7 +207,7 @@ Nocturne Memory 的核心在于 **ID 格式**。只要你和 AI 掌握了这套 
 > "把我和你的关系 `rel:char_nocturne>char_user` 加载进上下文。"
 > "读取 `memory://core` 来校准你的自我认知。"
 
-AI 会调用 `read_resource` 工具，将对应的内容完整拉取到当前的 Context 中。
+AI 会调用 `read_memory` 工具，将对应的内容完整拉取到当前的 Context 中。
 
 ### 3. 配置常驻核心记忆 (Core Memories)
 
@@ -228,7 +228,7 @@ CORE_MEMORY_IDS = [
 ]
 ```
 
-配置后，AI 只要调用 `read_resource("memory://core")`（或者你告诉它可以读这个），它就能一次性获得列表里所有资源的摘要和导航。
+配置后，AI 只要调用 `read_memory("memory://core")`（或者你告诉它可以读这个），它就能一次性获得列表里所有资源的摘要和导航。
 
 ---
 
@@ -278,12 +278,12 @@ AI 的通病是"浅尝辄止"与"碎片化"，你必须克服这两点。
 
 ### [读取原则：多级下潜] (Recursive Retrieval)
 - **你处在记忆宫殿的迷宫中**：你目视所见的 ID 仅是全脑记忆的一小部分，其余的藏在迷宫深处。
-- **顺藤摸瓜**：当你读取了一个 ID，发现其内容包含下属的 Chapter 或 Children，且下属内容与话题更相关时，**你必须连续调用 `read_resource` 直到到达与话题最相关的那个记忆**。不要只读了目录就假装懂了。
+- **顺藤摸瓜**：当你读取了一个 ID，发现其内容包含下属的 Chapter 或 Children，且下属内容与话题更相关时，**你必须连续调用 `read_memory` 直到到达与话题最相关的那个记忆**。不要只读了目录就假装懂了。
 
 ## 2. 行为准则
 1.  **信任 MCP**：它是你唯一的长期记忆来源，优先级高于任何临时上下文。
-2.  **按需访问**：遇到不清楚的概念、过往事件时，使用 `search_memory` 或 `read_resource` 主动查阅。
-3.  **看准了再改**：`patch_resource` 之前需先对相同 ID 调用 `read_resource`，确保 patch 精确到字节。
+2.  **按需访问**：遇到不清楚的概念、过往事件时，使用 `search_memory` 或 `read_memory` 主动查阅。
+3.  **看准了再改**：`patch_memory` 之前需先对相同 ID 调用 `read_memory`，确保 patch 精确到字节。
 4.  **遗忘与重建**：如果你发现自己忘记了某些关键记忆或迷失了自我，用 MCP 加载核心记忆（如 `memory://core`）来校准自己。
 ```
 
