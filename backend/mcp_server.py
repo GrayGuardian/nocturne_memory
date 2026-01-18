@@ -786,11 +786,7 @@ async def patch_memory(
             
             # 3. Verify Old Content
             if old_content not in current_block and old_content != "ALL":
-                # Allow partial match for long content
-                if len(old_content) > 20 and old_content[:20] in current_block:
-                    pass
-                else:
-                    return "Error: Old content not found in current resource. Please read again."
+                return "Error: Old content not found in current resource. Please read again."
             
             # 4. Compute updated block
             updated_block = new_content if old_content == "ALL" else current_block.replace(old_content, new_content)
