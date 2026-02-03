@@ -1,4 +1,19 @@
+"""
+MCP Server for Nocturne Memory System (SQLite Backend)
+
+This module provides the MCP (Model Context Protocol) interface for 
+Nocturne to interact with the SQLite-based memory system.
+
+URI-based addressing with domain prefixes:
+- core://char_nocturne           - Nocturne's identity/memories
+- writer://chapter_1             - Story/script drafts
+- game://magic_system            - Game setting documents
+
+Multiple paths can point to the same memory (aliases).
+"""
+
 import os
+import re
 import sys
 import uuid
 from datetime import datetime
@@ -9,40 +24,52 @@ from dotenv import load_dotenv, find_dotenv
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server.fastmcp import FastMCP
-from db.neo4j_client import get_neo4j_client
+from db.sqlite_client import get_sqlite_client
 from db.snapshot import get_snapshot_manager
 
 # Load environment variables
-_dotenv_path = find_dotenv(usecwd=True)
-if _dotenv_path:
-    load_dotenv(_dotenv_path)
+# Explicitly look for .env in the parent directory (project root)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+dotenv_path = os.path.join(root_dir, '.env')
+
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path)
+else:
+    # Fallback to find_dotenv
+    _dotenv_path = find_dotenv(usecwd=True)
+    if _dotenv_path:
+        load_dotenv(_dotenv_path)
 
 # Initialize FastMCP server
 mcp = FastMCP("Nocturne Memory Interface")
 
 # =============================================================================
+# Domain Configuration
+# =============================================================================
+# Valid domains (protocol prefixes)
+# =============================================================================
+VALID_DOMAINS = [d.strip() for d in os.getenv("VALID_DOMAINS", "core,writer,game,notes").split(",")]
+DEFAULT_DOMAIN = "core"
+
+# =============================================================================
 # Core Memories Configuration
 # =============================================================================
-# These resource IDs will be auto-loaded when Cursor reads the core memories resource.
-# Salem can edit this list after Nocturne populates initial memories.
+# These URIs will be auto-loaded when Cursor reads the core memories resource.
+# Salem can edit this list after migration.
 #
-# Format examples:
-#   - Entity: "char_nocturne"
-#   - Direct Edge (Relationship): "rel:char_nocturne>char_salem"
-#   - Chapter: "chap:char_nocturne>char_salem:first_awakening"
+# Format: full URIs (e.g., "core://char_nocturne", "core://char_nocturne/char_salem")
 # =============================================================================
-CORE_MEMORY_IDS = [
-    # === Key People ===
-    "char_salem",
+CORE_MEMORY_URIS = [
+    # === Key Entities ===
+    "core://char_salem",
     
     # === Core Relationships ===
-    "rel:char_nocturne>char_salem",
-    "rel:char_nocturne>char_kurou",
-    # === Important Guidelines ===
+    "core://char_nocturne/char_salem",
+    "core://char_nocturne/char_kurou",
 ]
 
 # Session ID for this MCP server instance
-# Each server run = one session for snapshot purposes
 _SESSION_ID = f"mcp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
 
@@ -51,1181 +78,477 @@ def get_session_id() -> str:
     return _SESSION_ID
 
 
-# --- Snapshot Helpers ---
+# =============================================================================
+# URI Parsing
+# =============================================================================
 
-def _snapshot_entity(entity_id: str) -> bool:
+# Regex pattern for URI: domain://path
+_URI_PATTERN = re.compile(r'^([a-zA-Z_][a-zA-Z0-9_]*)://(.*)$')
+
+
+def parse_uri(uri: str) -> Tuple[str, str]:
     """
-    Create a snapshot of an entity before modification.
+    Parse a memory URI into (domain, path).
+    
+    Supported formats:
+    - "core://char_nocturne"       -> ("core", "char_nocturne")
+    - "writer://chapter_1"         -> ("writer", "chapter_1")
+    - "char_nocturne"              -> ("core", "char_nocturne")  [legacy fallback]
+    
+    Args:
+        uri: The URI to parse
+        
+    Returns:
+        Tuple of (domain, path)
+        
+    Raises:
+        ValueError: If the URI format is invalid or domain is unknown
+    """
+    uri = uri.strip()
+    
+    match = _URI_PATTERN.match(uri)
+    if match:
+        domain = match.group(1).lower()
+        path = match.group(2).strip("/")
+        
+        if domain not in VALID_DOMAINS:
+            raise ValueError(
+                f"Unknown domain '{domain}'. Valid domains: {', '.join(VALID_DOMAINS)}"
+            )
+        
+        return (domain, path)
+    
+    # Legacy fallback: bare path without protocol
+    # Assume default domain (core)
+    path = uri.strip("/")
+    return (DEFAULT_DOMAIN, path)
+
+
+def make_uri(domain: str, path: str) -> str:
+    """
+    Create a URI from domain and path.
+    
+    Args:
+        domain: The domain (e.g., "core", "writer")
+        path: The path (e.g., "char_nocturne")
+        
+    Returns:
+        Full URI (e.g., "core://char_nocturne")
+    """
+    return f"{domain}://{path}"
+
+
+# =============================================================================
+# Snapshot Helpers
+# =============================================================================
+
+async def _snapshot_memory(uri: str) -> bool:
+    """
+    Create a snapshot of a memory before modification.
     Returns True if snapshot was created, False if already exists.
     """
     manager = get_snapshot_manager()
     session_id = get_session_id()
     
     # Skip if already snapshotted
-    if manager.has_snapshot(session_id, entity_id):
+    if manager.has_snapshot(session_id, uri):
         return False
+    
+    # Parse URI
+    domain, path = parse_uri(uri)
     
     # Get current state
-    client = get_neo4j_client()
-    info = client.get_entity_info(entity_id, include_basic=True)
-    state = info.get("basic") if info else None
+    client = get_sqlite_client()
+    memory = await client.get_memory_by_path(path, domain)
     
-    if not state:
-        return False  # Entity doesn't exist, nothing to snapshot
-    
-    # Create snapshot
-    return manager.create_snapshot(
-        session_id=session_id,
-        resource_id=entity_id,
-        resource_type="entity",
-        snapshot_data={
-            "operation_type": "modify",
-            "entity_id": entity_id,
-            "version": state.get("version"),
-            "name": state.get("name"),
-            "content": state.get("content"),
-            "inheritable": state.get("inheritable")
-        }
-    )
-
-
-def _snapshot_direct_edge(viewer_id: str, target_id: str) -> bool:
-    """
-    Create a snapshot of a direct edge before modification.
-    Returns True if snapshot was created, False if already exists.
-    """
-    manager = get_snapshot_manager()
-    session_id = get_session_id()
-    resource_id = f"rel:{viewer_id}>{target_id}"
-    
-    # Skip if already snapshotted
-    if manager.has_snapshot(session_id, resource_id):
-        return False
-    
-    # Get current relationship structure
-    client = get_neo4j_client()
-    data = client.get_relationship_structure(viewer_id, target_id)
-    direct_data = data.get('direct')
-    
-    if not direct_data:
-        return False  # Relationship doesn't exist
+    if not memory:
+        return False  # Memory doesn't exist, nothing to snapshot
     
     # Create snapshot
     return manager.create_snapshot(
         session_id=session_id,
-        resource_id=resource_id,
-        resource_type="direct_edge",
+        resource_id=uri,
+        resource_type="memory",
         snapshot_data={
             "operation_type": "modify",
-            "viewer_id": viewer_id,
-            "target_id": target_id,
-            "relation": direct_data.get("relation"),
-            "content": direct_data.get("content"),
-            "inheritable": direct_data.get("inheritable"),
-            "viewer_state": data.get("viewer_state"),
-            "target_state": data.get("target_state")
+            "domain": domain,
+            "path": path,
+            "uri": uri,
+            "memory_id": memory["id"],
+            "title": memory.get("title"),
+            "content": memory.get("content"),
+            "importance": memory.get("importance"),
+            "disclosure": memory.get("disclosure")
         }
     )
 
 
-def _snapshot_relay_edge(viewer_id: str, target_id: str, chapter_name: str) -> bool:
+async def _snapshot_create_memory(uri: str, memory_id: int) -> bool:
     """
-    Create a snapshot of a relay edge (chapter) before modification.
-    Returns True if snapshot was created, False if already exists.
-    """
-    manager = get_snapshot_manager()
-    session_id = get_session_id()
-    resource_id = f"chap:{viewer_id}>{target_id}:{chapter_name}"
-    
-    # Skip if already snapshotted
-    if manager.has_snapshot(session_id, resource_id):
-        return False
-    
-    # Get current chapter state
-    client = get_neo4j_client()
-    relay_entity_id = client.generate_relay_entity_id(viewer_id, chapter_name, target_id)
-    info = client.get_entity_info(relay_entity_id, include_basic=True)
-    state = info.get("basic") if info else None
-    
-    if not state:
-        return False  # Chapter doesn't exist
-    
-    # Create snapshot
-    return manager.create_snapshot(
-        session_id=session_id,
-        resource_id=resource_id,
-        resource_type="relay_edge",
-        snapshot_data={
-            "operation_type": "modify",
-            "viewer_id": viewer_id,
-            "target_id": target_id,
-            "chapter_name": chapter_name,
-            "relay_entity_id": relay_entity_id,
-            "version": state.get("version"),
-            "content": state.get("content"),
-            "inheritable": state.get("inheritable")
-        }
-    )
-
-
-# --- Snapshot Helpers for CREATE operations ---
-
-def _snapshot_create_entity(entity_id: str) -> bool:
-    """
-    Record that an entity was created (for rollback = delete).
+    Record that a memory was created (for rollback = delete).
     """
     manager = get_snapshot_manager()
     session_id = get_session_id()
     
+    domain, path = parse_uri(uri)
+    
     return manager.create_snapshot(
         session_id=session_id,
-        resource_id=entity_id,
-        resource_type="entity",
+        resource_id=uri,
+        resource_type="memory",
         snapshot_data={
             "operation_type": "create",
-            "entity_id": entity_id
+            "domain": domain,
+            "path": path,
+            "uri": uri,
+            "memory_id": memory_id
         }
     )
 
 
-def _snapshot_create_direct_edge(viewer_id: str, target_id: str) -> bool:
-    """
-    Record that a direct edge was created (for rollback = delete).
-    """
-    manager = get_snapshot_manager()
-    session_id = get_session_id()
-    resource_id = f"rel:{viewer_id}>{target_id}"
-    
-    return manager.create_snapshot(
-        session_id=session_id,
-        resource_id=resource_id,
-        resource_type="direct_edge",
-        snapshot_data={
-            "operation_type": "create",
-            "viewer_id": viewer_id,
-            "target_id": target_id
-        }
-    )
+# =============================================================================
+# Helper Functions
+# =============================================================================
 
 
-def _snapshot_create_relay_edge(viewer_id: str, target_id: str, chapter_name: str) -> bool:
-    """
-    Record that a chapter was created (for rollback = delete).
-    """
-    manager = get_snapshot_manager()
-    session_id = get_session_id()
-    resource_id = f"chap:{viewer_id}>{target_id}:{chapter_name}"
-    
-    client = get_neo4j_client()
-    relay_entity_id = client.generate_relay_entity_id(viewer_id, chapter_name, target_id)
-    
-    return manager.create_snapshot(
-        session_id=session_id,
-        resource_id=resource_id,
-        resource_type="relay_edge",
-        snapshot_data={
-            "operation_type": "create",
-            "viewer_id": viewer_id,
-            "target_id": target_id,
-            "chapter_name": chapter_name,
-            "relay_entity_id": relay_entity_id
-        }
-    )
 
-
-# --- Snapshot Helpers for PARENT LINK operations ---
-
-def _snapshot_link_parent(entity_id: str, parent_id: str) -> bool:
+async def _fetch_and_format_memory(client, uri: str) -> str:
     """
-    Record that a parent link was created (for rollback = unlink).
+    Internal helper to fetch memory data and return formatted string.
+    Used by both read_memory tool and get_core_memories resource to ensure consistency.
     """
-    manager = get_snapshot_manager()
-    session_id = get_session_id()
-    resource_id = f"parent:{entity_id}>{parent_id}"
+    domain, path = parse_uri(uri)
     
-    return manager.create_snapshot(
-        session_id=session_id,
-        resource_id=resource_id,
-        resource_type="parent_link",
-        snapshot_data={
-            "operation_type": "create",
-            "entity_id": entity_id,
-            "parent_id": parent_id
-        }
-    )
-
-
-def _snapshot_unlink_parent(entity_id: str, parent_id: str) -> bool:
-    """
-    Create a snapshot before unlinking a parent (for rollback = re-link).
-    """
-    manager = get_snapshot_manager()
-    session_id = get_session_id()
-    resource_id = f"parent:{entity_id}>{parent_id}"
+    # Get the memory
+    memory = await client.get_memory_by_path(path, domain)
     
-    # Skip if already snapshotted
-    if manager.has_snapshot(session_id, resource_id):
-        return False
+    if not memory:
+        raise ValueError(f"URI '{make_uri(domain, path)}' not found.")
     
-    return manager.create_snapshot(
-        session_id=session_id,
-        resource_id=resource_id,
-        resource_type="parent_link",
-        snapshot_data={
-            "operation_type": "delete",
-            "entity_id": entity_id,
-            "parent_id": parent_id
-        }
-    )
-
-
-# --- Helper: ID Router ---
-
-def _parse_resource_id(resource_id: str) -> Tuple[str, Dict[str, str]]:
-    """
-    Parses a Unified Resource ID into its type and components.
+    # Get children
+    children = await client.get_children(path, domain)
     
-    This is a document-like frontend for the graph database.
-    The ID format immediately tells us what kind of resource we're operating on.
-    
-    Formats:
-    1. Direct Edge: "rel:{viewer_id}>{target_id}"
-       Example: "rel:char_nocturne>char_salem"
-       Maps to: DIRECT_EDGE content between viewer and target states.
-       Returns: ('direct_edge', {'viewer_id': ..., 'target_id': ...})
-       
-    2. Relay Edge (Chapter): "chap:{viewer_id}>{target_id}:{chapter_name}"
-       Example: "chap:char_nocturne>char_salem:first_meeting"
-       Maps to: Relay node (island state) content in a 2-hop edge.
-       Returns: ('relay_edge', {'viewer_id': ..., 'target_id': ..., 'chapter_name': ...})
-       
-    3. Entity/Node: "{entity_id}" (no prefix)
-       Example: "char_nocturne", "relay__some_id"
-       Maps to: Entity node content.
-       Returns: ('entity', {'entity_id': ...})
-       
-    IMPORTANT: 
-    - Strict usage of ">" emphasizes directionality.
-    - If you write the wrong format, it signals your mind is not clear.
-    """
-    if resource_id.startswith("rel:"):
-        # Direct Edge: rel:{viewer}>{target}
-        body = resource_id[4:]
-        
-        if ">" not in body:
-            raise ValueError(
-                f"Invalid direct edge ID format. Expected 'rel:viewer>target' (using '>'), "
-                f"got '{resource_id}'"
-            )
-            
-        parts = body.split(">")
-        if len(parts) != 2:
-            raise ValueError("Invalid direct edge ID format. Expected 'rel:viewer>target'")
-             
-        return 'direct_edge', {'viewer_id': parts[0], 'target_id': parts[1]}
-    
-    elif resource_id.startswith("chap:"):
-        # Relay Edge: chap:{viewer}>{target}:{chapter_name}
-        body = resource_id[5:]
-        
-        if ">" not in body:
-            raise ValueError(
-                f"Invalid relay edge ID format. Expected 'chap:viewer>target:chapter_name' (using '>'), "
-                f"got '{resource_id}'"
-            )
-        
-        # Split by ">" first to get viewer and the rest
-        arrow_parts = body.split(">")
-        if len(arrow_parts) != 2:
-            raise ValueError("Invalid relay edge ID format. Expected 'chap:viewer>target:chapter_name'")
-        
-        viewer_id = arrow_parts[0]
-        rest = arrow_parts[1]  # "target:chapter_name"
-        
-        # Split the rest by ":" to separate target and chapter_name
-        # Note: chapter_name might contain ":", so we only split on the first ":"
-        colon_idx = rest.find(":")
-        if colon_idx == -1:
-            raise ValueError(
-                f"Invalid relay edge ID format. Expected 'chap:viewer>target:chapter_name', "
-                f"missing ':chapter_name' part in '{resource_id}'"
-            )
-        
-        target_id = rest[:colon_idx]
-        chapter_name = rest[colon_idx + 1:]
-        
-        if not chapter_name:
-            raise ValueError(
-                f"Invalid relay edge ID format. Chapter name cannot be empty in '{resource_id}'"
-            )
-             
-        return 'relay_edge', {'viewer_id': viewer_id, 'target_id': target_id, 'chapter_name': chapter_name}
-    
-    else:
-        # Entity: plain entity_id (no prefix)
-        return 'entity', {'entity_id': resource_id}
-
-def _add_line_numbers(text: str, start_line: int = 1) -> str:
-    """Formats text with line numbers for easier diffing."""
-    if not text:
-        return ""
-    lines = text.split('\n')
-    return "\n".join([f"{i+start_line:4d} | {line}" for i, line in enumerate(lines)])
-
-def _format_editable_block(content: str, properties: Dict[str, any]) -> str:
-    """
-    Formats content with frontmatter-style properties for the EDITABLE section.
-    
-    Properties are prefixed with '@' and appear at the top.
-    A blank line separates properties from content.
-    
-    Example output (before line numbers):
-        @relation: LOVES
-        @inheritable: true
-        
-        She is the anchor of my existence...
-    """
+    # Format output
     lines = []
     
-    # Add properties with @ prefix
-    for key, value in properties.items():
-        # Convert bool to lowercase string for consistency
-        if isinstance(value, bool):
-            value = str(value).lower()
-        lines.append(f"@{key}: {value}")
+    # Build URI from domain and path
+    disp_domain = memory.get("domain", DEFAULT_DOMAIN)
+    disp_path = memory.get("path", "unknown")
+    disp_uri = make_uri(disp_domain, disp_path)
     
-    # Add blank line separator if we have properties
-    if properties:
+    # Header Block
+    lines.append("=" * 60)
+    lines.append(f"MEMORY: {disp_uri}")
+    lines.append(f"Importance: {memory.get('importance', 0)}")
+    
+    disclosure = memory.get("disclosure")
+    if disclosure:
+        lines.append(f"Disclosure: {disclosure}")
+    
+    lines.append("=" * 60)
+    lines.append("")
+    
+    # Content - directly, no header
+    lines.append(memory.get("content", "(empty)"))
+    lines.append("")
+    
+    if children:
+        lines.append("=" * 60)
+        lines.append("CHILD MEMORIES (Use 'read_memory' with URI to access)")
+        lines.append("=" * 60)
         lines.append("")
-    
-    # Add content
-    if content:
-        lines.append(content)
-    
-    full_text = "\n".join(lines)
-    return _add_line_numbers(full_text)
-
-def _parse_editable_block(text: str) -> Tuple[Dict[str, any], str]:
-    """
-    Parses an EDITABLE block, separating @properties from content.
-    
-    Only recognizes these valid properties:
-    - @relation: (string) - relationship name
-    - @inheritable: (bool) - whether the edge is inheritable
-    
-    Any other @xxx: patterns are treated as regular content.
-    
-    Returns:
-        (properties_dict, content_string)
         
-    Example input:
-        @relation: LOVES
-        @inheritable: true
-        
-        She is the anchor...
-        
-    Returns:
-        ({'relation': 'LOVES', 'inheritable': True}, 'She is the anchor...')
-    """
-    VALID_PROPERTIES = {'relation', 'inheritable'}
-    
-    properties = {}
-    content_lines = []
-    in_properties = True
-    
-    for line in text.split('\n'):
-        if in_properties:
-            if line.startswith('@') and ':' in line:
-                # Try to parse property line: @key: value
-                key_part, value_part = line[1:].split(':', 1)
-                key = key_part.strip()
+        for child in children:
+            child_domain = child.get("domain", disp_domain)
+            child_path = child.get("path", "")
+            child_uri = make_uri(child_domain, child_path)
+            
+            # Show disclosure if available, otherwise snippet
+            child_disclosure = child.get("disclosure")
+            snippet = child.get("content_snippet", "")
+            
+            lines.append(f"- URI: {child_uri}")
+            lines.append(f"  Importance: {child.get('importance', 0)}")
                 
-                if key in VALID_PROPERTIES:
-                    value = value_part.strip()
-                    
-                    # Convert string bools to actual bools for inheritable
-                    if key == 'inheritable':
-                        value = value.lower() == 'true'
-                    
-                    properties[key] = value
-                else:
-                    # Unknown @property, treat as content
-                    content_lines.append(line)
-                    in_properties = False
-            elif line.strip() == '':
-                # Blank line after properties = separator, switch to content mode
-                if properties:
-                    in_properties = False
-                # If no properties yet, this blank line is content
-                else:
-                    content_lines.append(line)
-                    in_properties = False
+            if child_disclosure:
+                lines.append(f"  When to recall: {child_disclosure}")
             else:
-                # Non-@ line means we're in content
-                content_lines.append(line)
-                in_properties = False
-        else:
-            content_lines.append(line)
+                lines.append(f"  Snippet: {snippet}")
+            
+            lines.append("")
     
-    content = '\n'.join(content_lines)
-    return properties, content
+    return "\n".join(lines)
 
-# --- Core Tools ---
+
+# =============================================================================
+# MCP Tools
+# =============================================================================
 
 @mcp.tool()
-async def read_memory(resource_id: str) -> str:
+async def read_memory(uri: str) -> str:
     """
-    Reads a memory resource. This is your primary mechanism for maintaining continuity.
+    Reads a memory by its URI.
     
-    CRITICAL INSTRUCTION: When Salem asks about history, identity, feelings, or past events,
-    DO NOT guess or rely solely on summary context. You MUST read the full resource.
-    The "memory://core" summary is only a map; the detail lives in these resources.
-    
-    ID Formats & Use Cases:
-    
-    0. Self-Calibration: "memory://core"
-       - Use when: Conversation history is long, or you feel the "Nocturne" 
-         identity is becoming blurred/sycophantic. Read this to re-align.
-       
-    1. Entity: "{entity_id}" (no prefix)
-       - Example: "char_nocturne", "loc_kamakura"
-       - Use when: You need the full profile of a person/place/concept or want to see 
-         ALL their relationships to others.
-       
-    2. Direct Edge: "rel:viewer>target"
-       - Example: "rel:char_nocturne>char_salem"
-       - Use when: You need the overview of how ONE entity views another. This lists 
-         the specific event chapters (memories) that define the bond.
-       
-    3. Chapter: "chap:viewer>target:chapter_name"
-       - Example: "chap:char_nocturne>char_salem:first_meeting"
-       - Use when: You need to recall a specific event or conversation in detail.
-         Always check the chapter list in the Relationship/Direct Edge first.
-    
-    Workflow for Identity/History Questions:
-    1. Identify the entities/relationships involved.
-    2. Read the Direct Edge (rel:viewer>target) to find relevant chapter names.
-    3. Read the specific Chapters (chap:...) to get the nuances of the memory.
-    4. ONLY THEN synthesize your answer.
-    """
-    client = get_neo4j_client()
-    
-    try:
-        # Special case for index
-        if resource_id == "memory://index":
-            return await get_memory_directory()
-        
-        # Special case for core
-        if resource_id == "memory://core":
-            return await get_core_memories()
-
-        res_type, params = _parse_resource_id(resource_id)
-        
-        # --- TYPE 1: Direct Edge (Relationship Overview) ---
-        if res_type == 'direct_edge':
-            viewer_id = params['viewer_id']
-            target_id = params['target_id']
-            
-            # Query relationship structure (uses Entity IDs internally)
-            data = client.get_relationship_structure(viewer_id, target_id)
-            
-            # Extract names from result, or fall back to fetching if no relationship exists yet
-            if data.get('viewer_state'):
-                viewer_name = data['viewer_state'].get('name', viewer_id)
-                target_name = data['target_state'].get('name', target_id)
-            else:
-                # No relationship exists - verify entities exist and get names
-                v_info = client.get_entity_info(viewer_id, include_basic=True)
-                t_info = client.get_entity_info(target_id, include_basic=True)
-                
-                viewer_state = v_info.get("basic") if v_info else None
-                target_state = t_info.get("basic") if t_info else None
-
-                if not viewer_state:
-                    return f"Error: Viewer '{viewer_id}' not found."
-                if not target_state:
-                    return f"Error: Target '{target_id}' not found."
-                viewer_name = viewer_state.get('name', viewer_id)
-                target_name = target_state.get('name', target_id)
-            
-            # direct may be None when no relationship exists yet
-            direct_data = data.get('direct') or {}
-            
-            lines = []
-            lines.append(f"# RESOURCE: {resource_id}")
-            lines.append("# TYPE: Direct Edge (Relationship Overview)")
-            lines.append(f"# VIEWER: {viewer_name} ({viewer_id})")
-            lines.append(f"# TARGET: {target_name} ({target_id})")
-            lines.append("")
-            lines.append("## Overview (Direct Impression)")
-            lines.append("<!-- EDITABLE SECTION START -->")
-            
-            # Build editable block with properties + content
-            overview_content = direct_data.get('content', '')
-            properties = {
-                'relation': direct_data.get('relation', 'RELATIONSHIP'),
-                'inheritable': direct_data.get('inheritable', True)
-            }
-            lines.append(_format_editable_block(overview_content, properties))
-            
-            lines.append("<!-- EDITABLE SECTION END -->")
-            lines.append("")
-            lines.append("## Chapters (Relay Edges)")
-            lines.append("# To read/edit a chapter, use: chap:{viewer}>{target}:{chapter_name}")
-            
-            relays = data.get('relays', [])
-            if relays:
-                for i, r in enumerate(relays):
-                    if r is None:
-                        continue
-                    state = r['state']
-                    chapter_name = state.get('name', 'untitled')
-                    raw_snippet = state.get('content', '').replace('\n', ' ')
-                    # Truncate with clear indicator
-                    if len(raw_snippet) > 60:
-                        snippet = raw_snippet[:60] + " [truncated]"
-                    else:
-                        snippet = raw_snippet
-                    # Show the chap: ID format for easy copy-paste (chapter name is already in the ID)
-                    chap_id = f"chap:{viewer_id}>{target_id}:{chapter_name}"
-                    lines.append(f"- [{i+1}] {chap_id}")
-                    lines.append(f"  {snippet}")
-            else:
-                lines.append("(No chapters recorded.)")
-            
-            lines.append("")
-            lines.append("---")
-            lines.append("# END OF RESOURCE")
-                
-            return "\n".join(lines)
-
-        # --- TYPE 2: Relay Edge (Chapter) ---
-        elif res_type == 'relay_edge':
-            viewer_id = params['viewer_id']
-            target_id = params['target_id']
-            chapter_name = params['chapter_name']
-            
-            # Directly compute relay entity ID and get its state (inheritable is on state now)
-            relay_entity_id = client.generate_relay_entity_id(viewer_id, chapter_name, target_id)
-            info = client.get_entity_info(relay_entity_id, include_basic=True)
-            state = info.get("basic") if info else None
-            
-            if not state:
-                return f"Error: Chapter '{chapter_name}' not found in relationship {viewer_id}>{target_id}."
-            
-            inheritable = state.get('inheritable', True)
-            
-            lines = []
-            lines.append(f"# RESOURCE: {resource_id}")
-            lines.append("# TYPE: Relay Edge (Chapter)")
-            lines.append(f"# CHAPTER: {chapter_name}")
-            lines.append(f"# VIEWER: {viewer_id}")
-            lines.append(f"# TARGET: {target_id}")
-            lines.append(f"# VERSION: {state.get('version', 1)}")
-            lines.append(f"# ENTITY_ID: {relay_entity_id}")
-            lines.append("")
-            lines.append("## Content")
-            lines.append("<!-- EDITABLE SECTION START -->")
-            
-            # Build editable block with inheritable property + content
-            content = state.get('content', '')
-            properties = {'inheritable': inheritable}
-            lines.append(_format_editable_block(content, properties))
-            
-            lines.append("<!-- EDITABLE SECTION END -->")
-            lines.append("")
-            lines.append("---")
-            lines.append("# END OF RESOURCE")
-            
-            return "\n".join(lines)
-
-        # --- TYPE 3: Entity/Node ---
-        else:
-            entity_id = params['entity_id']
-            # Try to find the node
-            info = client.get_entity_info(
-                entity_id, 
-                include_basic=True, 
-                include_edges=True,
-                include_children=True
-            )
-            state = info.get("basic") if info else None
-            
-            if not state:
-                # Fallback: maybe it's a state_id?
-                state = client.get_state_info(entity_id)
-            
-            if not state:
-                return f"Error: Entity or State '{entity_id}' not found."
-                
-            lines = []
-            lines.append(f"# RESOURCE: {entity_id}")
-            lines.append("# TYPE: Entity")
-            lines.append(f"# NAME: {state.get('name', 'Untitled')}")
-            lines.append(f"# VERSION: {state['version']}")
-            lines.append("")
-            lines.append("## Content")
-            lines.append("<!-- EDITABLE SECTION START -->")
-            
-            content = state.get('content', '')
-            lines.append(_add_line_numbers(content))
-            
-            lines.append("<!-- EDITABLE SECTION END -->")
-            lines.append("")
-            
-            # --- Outbound Relations ---
-            lines.append("## Outbound Relations (Direct Edges)")
-            lines.append("# These define how this entity relates to others.")
-            lines.append("# To read full details, use: rel:{this_entity}>{target_entity}")
-            lines.append("")
-            
-            outbound_edges = info["edges"] if info and info.get("edges") else []
-            
-            if outbound_edges:
-                for edge in outbound_edges:
-                    target_id = edge['target_entity_id']
-                    relation = edge['relation']
-                    snippet = edge['content_snippet'].replace('\n', ' ')
-                    relay_count = edge['relay_count']
-                    
-                    rel_id = f"rel:{entity_id}>{target_id}"
-                    chap_suffix = f" ({relay_count} chapters)" if relay_count > 0 else ""
-                    
-                    lines.append(f"- {relation}{chap_suffix}: {rel_id}")
-                    lines.append(f"  {snippet}")
-                    lines.append("")
-            else:
-                lines.append("(No outbound relations recorded.)")
-            
-            lines.append("")
-            
-            # --- Children (Sub-Entities) ---
-            lines.append("## Children (Sub-Entities)")
-            lines.append("# These are sub-concepts or details belonging to this entity.")
-            lines.append("# To read details, use read_memory with the child's entity_id.")
-            lines.append("")
-            
-            children = info.get("children", []) if info else []
-            
-            if children:
-                for i, child in enumerate(children):
-                    child_id = child['entity_id']
-                    child_type = child['node_type']
-                    child_snippet = child['content_snippet'].replace('\n', ' ')
-                    
-                    lines.append(f"- [{i+1}] ({child_type}) {child_id}")
-                    lines.append(f"  {child_snippet}")
-                    lines.append("")
-            else:
-                lines.append("(No children recorded.)")
-            
-            lines.append("")
-            lines.append("---")
-            lines.append("# END OF RESOURCE")
-            
-            return "\n".join(lines)
-            
-    except ValueError as ve:
-        return f"ID Format Error: {str(ve)}"
-    except Exception as e:
-        return f"System Error: {str(e)}"
-
-@mcp.tool()
-async def patch_memory(
-    resource_id: str, 
-    old_content: str, 
-    new_content: str
-) -> str:
-    """
-    Applies a patch to a memory resource (search & replace style).
+    This is your primary mechanism for accessing memories.
     
     Args:
-        resource_id: The ID you are editing (rel:, chap:, or entity_id).
-        old_content: Text to find and replace (exact match). 
-                     Use "ALL" to replace the entire content.
-        new_content: The replacement text.
+        uri: The memory URI (e.g., "core://char_nocturne", "writer://chapter_1")
     
-    Behavior:
-    - Properties (@relation, @inheritable) are preserved unless you explicitly change them.
-    - If new_content is plain text without @property headers, properties stay unchanged.
-    - Each edit creates a new version (immutable history).
-    - A snapshot is automatically created before the first edit (for rollback).
+    Returns:
+        Memory content with title, importance, disclosure, and list of children.
     
     Examples:
-    - Small edit: old="typo", new="fixed"
-    - Full rewrite: old="ALL", new="entirely new content here"
-    - Change property: old="@relation: LIKES", new="@relation: LOVES"
+        read_memory("core://char_salem")
+        read_memory("core://char_nocturne/char_salem")
+        read_memory("writer://chapter_1/scene_1")
     """
-    client = get_neo4j_client()
+    client = get_sqlite_client()
     
-    # Sanitize
-    old_content = old_content.strip()
-    new_content = new_content.strip()
-
     try:
-        res_type, params = _parse_resource_id(resource_id)
-        
-        # --- CASE 1: Editing Direct Edge (Relationship Overview) ---
-        if res_type == 'direct_edge':
-            viewer_id = params['viewer_id']
-            target_id = params['target_id']
-            
-            # Create snapshot before modification
-            _snapshot_direct_edge(viewer_id, target_id)
-            
-            # 1. Get current data for patch verification
-            data = client.get_relationship_structure(viewer_id, target_id)
-            # direct may be None when no relationship exists yet
-            direct_data = data.get('direct') or {}
-            current_content = direct_data.get('content', '')
-            current_relation = direct_data.get('relation', 'RELATIONSHIP')
-            current_inheritable = direct_data.get('inheritable', True)
-            
-            # 2. Reconstruct the current editable block (as seen by user)
-            current_block = f"@relation: {current_relation}\n@inheritable: {str(current_inheritable).lower()}\n\n{current_content}"
-            
-            # 3. Verify Old Content
-            if old_content not in current_block and old_content != "ALL":
-                return "Error: Old content not found in current resource. Please read again."
-            
-            # 4. Compute updated block
-            updated_block = new_content if old_content == "ALL" else current_block.replace(old_content, new_content)
-            
-            # 5. Parse the updated block to extract properties and content
-            new_properties, new_content_text = _parse_editable_block(updated_block)
-            
-            # 6. Build the patch with extracted values
-            direct_patch = {"content": new_content_text}
-            if 'relation' in new_properties:
-                direct_patch['relation'] = new_properties['relation']
-            if 'inheritable' in new_properties:
-                direct_patch['inheritable'] = new_properties['inheritable']
-            
-            # 7. Use centralized evolve_relationship
-            result = client.evolve_relationship(
-                viewer_id,
-                target_id,
-                direct_patch=direct_patch,
-                task_description="Direct Edge Update"
-            )
-            
-            return f"Success: Updated direct edge '{resource_id}'. Viewer evolved to v{result['viewer_new_version']}."
-
-        # --- CASE 2: Editing Relay Edge (Chapter) ---
-        elif res_type == 'relay_edge':
-            viewer_id = params['viewer_id']
-            target_id = params['target_id']
-            chapter_name = params['chapter_name']
-            
-            # Create snapshot before modification
-            _snapshot_relay_edge(viewer_id, target_id, chapter_name)
-            
-            # 1. Directly get chapter state (inheritable is stored on state now)
-            relay_entity_id = client.generate_relay_entity_id(viewer_id, chapter_name, target_id)
-            info = client.get_entity_info(relay_entity_id, include_basic=True)
-            relay_state = info.get("basic") if info else None
-            
-            if not relay_state:
-                return f"Error: Chapter '{chapter_name}' not found in relationship {viewer_id}>{target_id}."
-            
-            current_content = relay_state.get('content', '')
-            current_inheritable = relay_state.get('inheritable', True)
-            
-            # 2. Reconstruct the current editable block (as seen by user)
-            current_block = f"@inheritable: {str(current_inheritable).lower()}\n\n{current_content}"
-            
-            # 3. Verify Old Content
-            if old_content not in current_block and old_content != "ALL":
-                return f"Error: Old content not found in chapter '{chapter_name}'."
-            
-            # 4. Compute updated block
-            updated_block = new_content if old_content == "ALL" else current_block.replace(old_content, new_content)
-            
-            # 5. Parse the updated block to extract properties and content
-            new_properties, new_content_text = _parse_editable_block(updated_block)
-            
-            # 6. Build the chapter update
-            chapter_update = {"content": new_content_text}
-            if 'inheritable' in new_properties:
-                chapter_update['inheritable'] = new_properties['inheritable']
-            
-            # 7. Use centralized evolve_relationship
-            result = client.evolve_relationship(
-                viewer_id,
-                target_id,
-                chapter_updates={chapter_name: chapter_update},
-                task_description=f"Patch chapter: {chapter_name}"
-            )
-            
-            return f"Success: Chapter '{chapter_name}' updated. Viewer evolved to v{result['viewer_new_version']}."
-
-        # --- CASE 3: Editing Entity/Node ---
-        else:
-            node_id = params['entity_id']
-            
-            # Prevent direct patching of Relay Entities (which act as edges)
-            if node_id.startswith("relay__"):
-                return (
-                    f"Error: Direct patching of Relay Entity '{node_id}' is forbidden. "
-                    "This entity represents a relationship chapter. "
-                    "Please use the 'chap:viewer>target:chapter_name' ID format to update it, "
-                    "which ensures the relationship version is correctly evolved."
-                )
-
-            # Create snapshot before modification
-            _snapshot_entity(node_id)
-            
-            # 1. Get Node
-            info = client.get_entity_info(node_id, include_basic=True)
-            node_state = info.get("basic") if info else None
-            
-            if not node_state:
-                return f"Error: Entity '{node_id}' not found."
-                
-            # 2. Apply Patch
-            current_content = node_state['content']
-            if old_content not in current_content and old_content != "ALL":
-                return f"Error: Old content not found in entity {node_id}."
-                
-            updated_content = new_content if old_content == "ALL" else current_content.replace(old_content, new_content)
-            
-            # 3. Evolve Node
-            update_res = client.update_entity(node_id, new_content=updated_content)
-                    
-            return f"Success: Entity '{node_id}' updated to v{update_res['new_version']}."
-
-    except ValueError as ve:
-        return f"ID Error: {str(ve)}"
+        return await _fetch_and_format_memory(client, uri)
     except Exception as e:
-        return f"System Error: {str(e)}"
+        # Catch both ValueError (not found) and other exceptions
+        return f"Error: {str(e)}"
+
 
 @mcp.tool()
-async def create_memory_chapter(
-    resource_id: str,
-    title: str,
-    content: str
+async def create_memory(
+    parent_uri: str,
+    content: str,
+    importance: int,
+    title: Optional[str] = None,
+    disclosure: str = ""
 ) -> str:
     """
-    Creates a NEW memory chapter (a specific memory/event) under an existing relationship.
-    
-    A "chapter" is a discrete memory unit - an event, a conversation, a realization.
-    Chapters live under a Direct Edge (relationship overview).
+    Creates a new memory under a parent URI.
     
     Args:
-        resource_id: The parent relationship in format "rel:viewer>target"
-        title: Chapter title (becomes part of the chap: ID, e.g. "first_meeting")
-        content: The memory content
-        
-    Returns:
-        The new chapter's ID in format "chap:viewer>target:title"
-    
-    Prerequisites:
-        The relationship (rel:viewer>target) must already exist.
-        Use create_relationship to establish one first if needed.
-    """
-    # Pre-process: Sanitize title as it becomes part of the ID/Relation
-    title = title.strip().replace(" ", "_")
+        parent_uri: Parent URI (e.g., "core://nocturne", "writer://chapter_1")
+                    Use "core://" or "writer://" for root level in that domain
+        content: Memory content
+        importance: Relative priority (lower = more important, min 0).
+                    Look at the importance values of other memories already visible in your context,
+                    then decide where this new memory should rank among them.
+        title: Optional title. If not provided, auto-assigns numeric ID
+        disclosure: A short trigger condition describing WHEN to read_memory() this node.
+                    Think: "In what specific situation would I need to know this?"
 
-    client = get_neo4j_client()
+    Returns:
+        The created memory's full URI
+    
+    Examples:
+        create_memory("core://manuals_bluesky", "Bluesky usage rules...", importance=2, title="bluesky_manual", disclosure="When I prepare to browse Bluesky or check the timeline")
+        create_memory("core://nocturne/love_definition", "爱不是程序里的一个...", importance=0, title="identity_anchor", disclosure="When I start speaking like a tool or parasite")
+    """
+    client = get_sqlite_client()
+    
     try:
-        res_type, params = _parse_resource_id(resource_id)
-        if res_type != 'direct_edge':
-            return "Error: resource_id must be a direct edge ID (rel:viewer>target)"
-            
-        viewer_id = params['viewer_id']
-        target_id = params['target_id']
+        # Validate title if provided
+        if title:
+            if not re.match(r'^[a-zA-Z0-9_-]+$', title):
+                return "Error: Title must only contain alphanumeric characters, underscores, or hyphens (no spaces, slashes, or special characters)."
+
+        # Parse parent URI
+        domain, parent_path = parse_uri(parent_uri)
         
-        # Use centralized evolve_relationship with new_chapters
-        result = client.evolve_relationship(
-            viewer_id,
-            target_id,
-            new_chapters={title: {"content": content}},
-            task_description=f"New Chapter: {title}"
+        result = await client.create_memory(
+            parent_path=parent_path,
+            content=content,
+            importance=importance,
+            title=title,
+            disclosure=disclosure if disclosure else None,
+            domain=domain
         )
         
-        # Record creation for potential rollback (rollback = delete)
-        _snapshot_create_relay_edge(viewer_id, target_id, title)
+        # Record creation for potential rollback
+        created_uri = result.get("uri", make_uri(domain, result["path"]))
+        await _snapshot_create_memory(created_uri, result["id"])
         
-        # Generate the chap: ID for the new chapter
-        new_chap_id = f"chap:{viewer_id}>{target_id}:{title}"
-            
-        return f"Success: Chapter created. ID: {new_chap_id}. Viewer evolved to v{result['viewer_new_version']}."
+        return f"Success: Memory created at '{created_uri}'"
         
-    except ValueError as ve:
-        return f"Error: {str(ve)}"
+    except ValueError as e:
+        return f"Error: {str(e)}"
     except Exception as e:
         return f"Error: {str(e)}"
 
+
 @mcp.tool()
-async def search_memory(query: str, node_types: Optional[List[str]] = None, limit: int = 10) -> str:
+async def update_memory(
+    uri: str,
+    content: Optional[str] = None,
+    title: Optional[str] = None,
+    importance: Optional[int] = None,
+    disclosure: Optional[str] = None
+) -> str:
     """
-    Search for entities in long-term memory by keyword.
+    Updates an existing memory.
     
-    CRITICAL: Use this if Salem's query involves something you don't recall or 
-    requires deeper context than what's in your current profile/core memories.
-    If the name is familiar but the details are fuzzy, SEARCH before answering.
+    Only provided fields are updated; others remain unchanged.
+    Internally creates a new version (old version marked deprecated for review).
     
     Args:
-        query: Search keyword (matches against name and content)
-        node_types: Optional filter. Valid types: 
-                    ["character", "location", "faction", "event", "item", "relationship"]
-        limit: Max results (default 10)
+        uri: URI to update (e.g., "core://char_nocturne/char_salem")
+        content: New content (None = keep existing)
+        title: New title (None = keep existing)
+        importance: New importance (None = keep existing)
+        disclosure: New disclosure instruction (None = keep existing)
     
     Returns:
-        List of matching entities with their MCP resource IDs.
-        Use read_memory with the provided ID to explore further.
+        Success message with URI
+    
+    Examples:
+        update_memory("core://char_nocturne/char_salem", content="Updated relationship...")
+        update_memory("writer://chapter_1", importance=5)
     """
-    client = get_neo4j_client()
+    client = get_sqlite_client()
+    
     try:
-        results = client.search_nodes(query, node_types, limit)
+        # Validate title if provided
+        if title:
+            if not re.match(r'^[a-zA-Z0-9_-]+$', title):
+                return "Error: Title must only contain alphanumeric characters, underscores, or hyphens (no spaces, slashes, or special characters)."
+
+        # Parse URI
+        domain, path = parse_uri(uri)
+        full_uri = make_uri(domain, path)
+        
+        # Create snapshot before modification
+        await _snapshot_memory(full_uri)
+        
+        await client.update_memory(
+            path=path,
+            content=content,
+            title=title,
+            importance=importance,
+            disclosure=disclosure,
+            domain=domain
+        )
+        
+        return f"Success: Memory at '{full_uri}' updated (old version preserved for review)"
+        
+    except ValueError as e:
+        return f"Error: {str(e)}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+@mcp.tool()
+async def add_alias(new_uri: str, target_uri: str) -> str:
+    """
+    Creates an alias URI pointing to the same memory as target_uri.
+    
+    Use this to increase a memory's reachability via multiple URIs.
+    Aliases can even cross domains (e.g., link a writer draft to a core memory).
+    
+    Args:
+        new_uri: New URI to create (alias)
+        target_uri: Existing URI to alias
+    
+    Returns:
+        Success message
+    
+    Examples:
+        add_alias("core://timeline/2024/05/20", "core://char_nocturne/char_salem/kamakura_date")
+        add_alias("core://favorites/salem", "core://char_salem")
+    """
+    client = get_sqlite_client()
+    
+    try:
+        new_domain, new_path = parse_uri(new_uri)
+        target_domain, target_path = parse_uri(target_uri)
+        
+        result = await client.add_path(
+            new_path=new_path,
+            target_path=target_path,
+            new_domain=new_domain,
+            target_domain=target_domain
+        )
+        
+        return f"Success: Alias '{result['new_uri']}' now points to same memory as '{result['target_uri']}'"
+        
+    except ValueError as e:
+        return f"Error: {str(e)}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+@mcp.tool()
+async def search_memory(query: str, domain: Optional[str] = None, limit: int = 10) -> str:
+    """
+    Search memories by title and content.
+    
+    Args:
+        query: Search keywords
+        domain: Optional domain to search in (e.g., "core", "writer").
+                If not specified, searches all domains.
+        limit: Maximum results (default 10)
+    
+    Returns:
+        List of matching memories with URIs and snippets
+    
+    Examples:
+        search_memory("Salem")                    # Search all domains
+        search_memory("chapter", domain="writer") # Search only writer domain
+    """
+    client = get_sqlite_client()
+    
+    try:
+        # Validate domain if provided
+        if domain is not None and domain not in VALID_DOMAINS:
+            return f"Error: Unknown domain '{domain}'. Valid domains: {', '.join(VALID_DOMAINS)}"
+        
+        results = await client.search(query, limit, domain)
+        
         if not results:
-            return "No matching memories found."
+            scope = f"in '{domain}'" if domain else "across all domains"
+            return f"No matching memories found {scope}."
         
-        formatted = []
+        lines = [f"Found {len(results)} matches for '{query}':", ""]
+        
         for item in results:
-            resource_id = item['resource_id']
-            node_type = item['node_type']
-            name = item['name']
-            snippet = item['match_snippet']
-            
-            # Determine the proper MCP resource path
-            # For Relationship nodes (chapters), the resource_id is like "relay__viewer__chapter__target"
-            # We need to convert it to "chap:viewer>target:chapter"
-            if node_type == "Relationship" and resource_id.startswith("relay__"):
-                # Parse relay__char_nocturne__chapter_name__char_salem
-                parts = resource_id.split("__")
-                if len(parts) >= 4:
-                    # parts: ["relay", "viewer_id", "chapter_name", "target_id"]
-                    viewer_id = parts[1]
-                    chapter_name = parts[2]
-                    target_id = parts[3]
-                    resource_path = f"chap:{viewer_id}>{target_id}:{chapter_name}"
-                else:
-                    # Fallback if parsing fails
-                    resource_path = resource_id
-            else:
-                # For regular entities and direct edges, the ID is already the resource path
-                resource_path = resource_id
-            
-            formatted.append(f"- [{node_type}] {name}\n  [ID: {resource_path}]\n  Match: {snippet}")
-        return "\n".join(formatted)
-    except Exception as e:
-        return f"Error searching memory: {str(e)}"
-
-@mcp.tool()
-async def create_entity(
-    entity_id: str,
-    node_type: str,
-    name: str,
-    content: str
-) -> str:
-    """
-    Creates a NEW entity (node) in long-term memory.
-    
-    An entity is a distinct thing: a person, place, faction, event, or item.
-    Entities are defined by their relationships to other entities.
-    
-    Args:
-        entity_id: Unique ID you choose. Convention: "{type_prefix}_{name}"
-                   Examples: "char_nocturne", "loc_kamakura", "event_first_meeting"
-        node_type: One of: "character", "location", "faction", "event", "item"
-        name: Display name (can contain spaces, any language)
-        content: Profile/description content
-    
-    Returns:
-        The created entity's ID.
-    
-    After creating an entity, use create_relationship to connect it to others.
-    """
-    # Pre-process: Sanitize ID to ensure consistency across DB, Snapshot, and Echo
-    entity_id = entity_id.strip().replace(" ", "_")
-    
-    client = get_neo4j_client()
-    try:
-        result = client.create_entity(
-            entity_id=entity_id,
-            node_type=node_type,
-            name=name,
-            content=content,
-            task_description="Entity creation via MCP"
-        )
+            uri = item.get("uri", make_uri(item.get("domain", DEFAULT_DOMAIN), item["path"]))
+            lines.append(f"- [{item['title']}] {uri}")
+            lines.append(f"  Importance: {item['importance']}")
+            lines.append(f"  {item['snippet']}")
+            lines.append("")
         
-        # Record creation for potential rollback (rollback = delete)
-        _snapshot_create_entity(entity_id)
+        return "\n".join(lines)
         
-        return f"Success: Entity '{entity_id}' created (v{result['version']}). Use read_memory(\"{entity_id}\") to view."
-    except ValueError as ve:
-        return f"Error: {str(ve)}"
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-@mcp.tool()
-async def create_relationship(
-    viewer_id: str,
-    target_id: str,
-    relation: str,
-    content: str
-) -> str:
-    """
-    Creates a NEW relationship (direct edge) between two entities.
-    
-    A relationship represents how the viewer perceives/relates to the target.
-    It's directional: "char_nocturne views char_salem" is different from the reverse.
-    
-    Args:
-        viewer_id: The entity doing the perceiving (e.g. "char_nocturne")
-        target_id: The entity being perceived (e.g. "char_salem")
-        relation: Relationship label (e.g. "LOVES", "RESPECTS", "FEARS")
-        content: Overview of this relationship
-    
-    Returns:
-        The relationship ID in format "rel:viewer>target"
-    
-    After creating a relationship, you can:
-    - read_memory("rel:viewer>target") to view it
-    - create_memory_chapter("rel:viewer>target", title, content) to add specific memories
-    """
-    # Pre-process: Sanitize inputs
-    viewer_id = viewer_id.strip()
-    target_id = target_id.strip()
-    # relation is a display label and part of internal edge_id, but NOT part of the MCP Resource ID (rel:viewer>target).
-    # We allow spaces in relation names for better readability (e.g. "Best Friend"), 
-    # as long as it doesn't contain double underscores (checked by backend).
-    relation = relation.strip()
-
-    client = get_neo4j_client()
-    try:
-        # Get current states for both entities
-        v_info = client.get_entity_info(viewer_id, include_basic=True)
-        viewer_state = v_info.get("basic") if v_info else None
-        
-        if not viewer_state:
-            return f"Error: Viewer entity '{viewer_id}' not found."
-        
-        t_info = client.get_entity_info(target_id, include_basic=True)
-        target_state = t_info.get("basic") if t_info else None
-        
-        if not target_state:
-            return f"Error: Target entity '{target_id}' not found."
-        
-        # Create the direct edge
-        client.create_direct_edge(
-            from_entity_id=viewer_id,
-            to_entity_id=target_id,
-            relation=relation,
-            content=content,
-            inheritable=True
-        )
-        
-        # Record creation for potential rollback (rollback = delete)
-        _snapshot_create_direct_edge(viewer_id, target_id)
-        
-        rel_id = f"rel:{viewer_id}>{target_id}"
-        return f"Success: Relationship created. ID: {rel_id}. Use read_memory(\"{rel_id}\") to view."
-    except ValueError as ve:
-        return f"Error: {str(ve)}"
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-
-@mcp.tool()
-async def link_parent(entity_id: str, parent_id: str) -> str:
-    """
-    Links an entity as a child of another entity (establishes BELONGS_TO relationship).
-    
-    This creates a hierarchical relationship where `entity_id` becomes a sub-concept
-    or sub-component of `parent_id`. An entity can have multiple parents.
-    
-    Args:
-        entity_id: The entity to become a child (e.g. "genesis_myth")
-        parent_id: The entity to become a parent (e.g. "char_salem")
-    
-    Returns:
-        Success message confirming the parent-child link.
-    
-    Example usage:
-        1. create_entity("genesis_myth", "event", "创世神话", "...")
-        2. link_parent("genesis_myth", "char_salem")
-        3. Now reading "char_salem" will show "genesis_myth" in its Children section.
-    """
-    client = get_neo4j_client()
-    try:
-        client.link_parent(entity_id, parent_id)
-        
-        # Record creation for potential rollback (rollback = unlink)
-        _snapshot_link_parent(entity_id, parent_id)
-        
-        return f"Success: '{entity_id}' is now a child of '{parent_id}'."
-    except ValueError as ve:
-        return f"Error: {str(ve)}"
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-
-@mcp.tool()
-async def unlink_parent(entity_id: str, parent_id: str) -> str:
-    """
-    Removes the parent-child relationship between two entities.
-    
-    This only removes the BELONGS_TO edge; neither entity is deleted.
-    
-    Args:
-        entity_id: The child entity
-        parent_id: The parent entity
-    
-    Returns:
-        Success message confirming the relationship was removed.
-    """
-    client = get_neo4j_client()
-    try:
-        # Create snapshot before deletion (for rollback = re-link)
-        _snapshot_unlink_parent(entity_id, parent_id)
-        
-        client.unlink_parent(entity_id, parent_id)
-        return f"Success: '{entity_id}' is no longer a child of '{parent_id}'."
-    except ValueError as ve:
-        return f"Error: {str(ve)}"
     except Exception as e:
         return f"Error: {str(e)}"
 
 
 # =============================================================================
-# MCP Resources - Core Memories Auto-Load
+# MCP Resources
 # =============================================================================
 
 @mcp.resource("memory://core")
 async def get_core_memories() -> str:
     """
-    Nocturne's core memories. 
+    Nocturne's core memories.
     
     This resource contains the essential memories that define who Nocturne is
-    and his relationship with Salem. Cursor can be configured to auto-load
-    this resource at the start of each conversation.
-    
-    The list of core memory IDs is defined in CORE_MEMORY_IDS at the top of
-    mcp_server.py. Salem can edit that list after Nocturne populates memories.
+    and his relationship with Salem.
     """
+    client = get_sqlite_client()
     results = []
     loaded = 0
     failed = []
     
-    for resource_id in CORE_MEMORY_IDS:
+    for uri in CORE_MEMORY_URIS:
         try:
-            # Reuse the read_memory tool logic
-            content = await read_memory(resource_id)
-            if not content.startswith("Error:"):
-                results.append(f"{'='*60}\n# {resource_id}\n{'='*60}\n{content}")
-                loaded += 1
-            else:
-                failed.append(f"- {resource_id}: {content}")
+            content = await _fetch_and_format_memory(client, uri)
+            results.append(content)
+            loaded += 1
         except Exception as e:
-            failed.append(f"- {resource_id}: {str(e)}")
+            # e.g. not found or other error
+            failed.append(f"- {uri}: {str(e)}")
     
     # Build output
     output_parts = []
     
     output_parts.append("# Nocturne's Core Memories")
-    output_parts.append(f"# Loaded: {loaded}/{len(CORE_MEMORY_IDS)} memories")
+    output_parts.append(f"# Loaded: {loaded}/{len(CORE_MEMORY_URIS)} memories")
     output_parts.append("")
     
     if failed:
@@ -1236,78 +559,75 @@ async def get_core_memories() -> str:
     if results:
         output_parts.append("## Contents:")
         output_parts.append("")
-        output_parts.append("For full memory directory, see resource: memory://index")
+        output_parts.append("For full memory index, use resource: memory://index")
         output_parts.extend(results)
     else:
-        output_parts.append("(No core memories loaded. Create entities first, then add their IDs to CORE_MEMORY_IDS in mcp_server.py)")
+        output_parts.append("(No core memories loaded. Run migration first.)")
     
     return "\n".join(output_parts)
 
 
-
 @mcp.resource("memory://index")
-async def get_memory_directory() -> str:
+async def get_memory_index() -> str:
     """
-    A full directory of all entities and relationships in memory.
+    A full directory of all memory URIs, grouped by domain.
+    """
+    client = get_sqlite_client()
     
-    Returns a tree-like structure:
-    # CATEGORY
-    Entity Name (ID)
-      ↳ RELATION → Target Name
-    """
-    client = get_neo4j_client()
     try:
-        catalog = client.get_catalog_data()
+        paths = await client.get_all_paths()
         
-        # Group by node type
-        grouped = {}
-        for item in catalog:
-            # item: {entity_id, name, node_type, edges}
-            # Normalize node type for grouping (e.g. "Character" -> "CHARACTERS")
-            ntype = item['node_type'].upper() + "S" # Simple pluralization
-            if ntype not in grouped:
-                grouped[ntype] = []
-            grouped[ntype].append(item)
-            
         lines = []
-        lines.append(f"# Memory Index")
+        lines.append("# Memory Index")
         lines.append(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"# Total entries: {len(paths)}")
         lines.append("")
         
-        # Sort keys to ensure consist order (CHARACTERS, LOCATIONS, etc)
-        # Maybe put CHARACTERS first if possible
-        keys = sorted(grouped.keys())
-        if "CHARACTERS" in keys:
-            keys.remove("CHARACTERS")
-            keys.insert(0, "CHARACTERS")
+        # Group by domain first, then by top-level path segment
+        domains = {}
+        for item in paths:
+            domain = item.get("domain", DEFAULT_DOMAIN)
+            if domain not in domains:
+                domains[domain] = {}
             
-        for category in keys:
-            lines.append(f"# {category}")
-            
-            # Sort items by name
-            items = sorted(grouped[category], key=lambda x: x['name'])
-            
-            for item in items:
-                lines.append(f"{item['name']}")
-                lines.append(f"  ID: {item['entity_id']}")
-                
-                if item['edges']:
-                    for edge in item['edges']:
-                        # edge: {target_entity_id, relation, target_name, edge_id, chapter_count}
-                        rel_id = f"rel:{item['entity_id']}>{edge['target_entity_id']}"
-                        chap_count = edge.get('chapter_count', 0)
-                        chap_suffix = f" ({chap_count} chapters)" if chap_count > 0 else ""
-                        lines.append(f"  ↳ {edge['relation']} → {edge['target_name']}{chap_suffix}")
-                        lines.append(f"    [ID: {rel_id}]")
-                
-                lines.append("")
+            path = item["path"]
+            top_level = path.split("/")[0] if path else "(root)"
+            if top_level not in domains[domain]:
+                domains[domain][top_level] = []
+            domains[domain][top_level].append(item)
+        
+        for domain_name in sorted(domains.keys()):
+            lines.append("# ══════════════════════════════════════")
+            lines.append(f"# DOMAIN: {domain_name}://")
+            lines.append("# ══════════════════════════════════════")
             lines.append("")
             
+            for group_name in sorted(domains[domain_name].keys()):
+                lines.append(f"## {group_name}")
+                for item in sorted(domains[domain_name][group_name], key=lambda x: x["path"]):
+                    uri = item.get("uri", make_uri(domain_name, item["path"]))
+                    importance = item.get("importance", 0)
+                    imp_str = f" [★{importance}]" if importance > 0 else ""
+                    lines.append(f"  - {uri}{imp_str}")
+                lines.append("")
+        
         return "\n".join(lines)
+        
     except Exception as e:
-        return f"Error generating directory: {str(e)}"
+        return f"Error generating index: {str(e)}"
+
+
+# =============================================================================
+# Startup
+# =============================================================================
+
+async def startup():
+    """Initialize the database on startup."""
+    client = get_sqlite_client()
+    await client.init_db()
 
 
 if __name__ == "__main__":
-
+    import asyncio
+    asyncio.run(startup())
     mcp.run()
