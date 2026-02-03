@@ -1,11 +1,15 @@
-# Nocturne Memory
+# Nocturne Memory (v1.0)
+
+> **⚠️ MIGRATION ALERT**
+> Current `main` branch is migrating to **SQL (v1.0)**.
+> For the stable Neo4j version, please switch to branch: [`legacy/neo4j`](../../tree/legacy/neo4j).
 
 ### 🧠 The External Hippocampus for AI Agents
 **AI 长期记忆与动态知识图谱系统**
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
-![Neo4j](https://img.shields.io/badge/database-Neo4j-green.svg)
+![SQL](https://img.shields.io/badge/database-SQLite-blue.svg)
 ![MCP](https://img.shields.io/badge/protocol-MCP-orange.svg)
 
 [English Version](README_EN.md)

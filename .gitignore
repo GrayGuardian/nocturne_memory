@@ -1,5 +1,6 @@
 .env
 backend/README.md
+nocturne_memory.db
 
 # Python
 __pycache__/

@@ -1,27 +1,29 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from api import nodes_router, review_router, edges_router, exploration_router, catalog_router
-from db import close_neo4j_client
+from api import review_router, browse_router
+from db import get_sqlite_client, close_sqlite_client
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时
-    print("Knowledge Graph API starting...")
-    # 尝试自动初始化数据库（如果为空）
+    print("Memory API starting...")
+    
+    # Initialize SQLite
     try:
-        from db import get_neo4j_client
-        client = get_neo4j_client()
-        client.initialize_db_if_empty()
+        sqlite_client = get_sqlite_client()
+        await sqlite_client.init_db()
+        print("SQLite database initialized.")
     except Exception as e:
-        print(f"Failed to auto-initialize DB: {e}")
+        print(f"Failed to initialize SQLite: {e}")
     
     yield
+    
     # 关闭时
-    print("Closing Neo4j connection...")
-    close_neo4j_client()
+    print("Closing database connections...")
+    await close_sqlite_client()
 
 
 app = FastAPI(
@@ -41,11 +43,8 @@ app.add_middleware(
 )
 
 # 注册路由
-app.include_router(nodes_router)
 app.include_router(review_router)
-app.include_router(edges_router)
-app.include_router(exploration_router)
-app.include_router(catalog_router)
+app.include_router(browse_router)
 
 
 @app.get("/")
