@@ -470,6 +470,16 @@ async def _generate_boot_memory_view() -> str:
     else:
         output_parts.append("(No core memories loaded. Run migration first.)")
     
+    # Append recent memories to boot output so Nocturne sees what changed recently
+    try:
+        recent_view = await _generate_recent_memories_view(limit=5)
+        output_parts.append("")
+        output_parts.append("---")
+        output_parts.append("")
+        output_parts.append(recent_view)
+    except Exception:
+        pass  # Non-critical; don't break boot if recent query fails
+    
     return "\n".join(output_parts)
 
 
