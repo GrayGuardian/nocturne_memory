@@ -183,11 +183,43 @@ async def _diff_path_create_alias(snapshot: dict, resource_id: str) -> dict:
             "unified": unified, "summary": summary, "has_changes": has_changes}
 
 
+async def _get_surviving_paths(client, memory_id: int) -> list:
+    """Follow the version chain from memory_id to the latest version,
+    then return all living paths pointing to that memory.
+    
+    This lets Salem see whether a deleted path was just an alias
+    or the last remaining route to the memory content.
+    """
+    if not memory_id:
+        return []
+    
+    # Follow migrated_to chain to find the latest version
+    current_id = memory_id
+    visited = set()
+    while current_id and current_id not in visited:
+        visited.add(current_id)
+        version = await client.get_memory_version(current_id)
+        if not version or not version.get("migrated_to"):
+            break
+        current_id = version["migrated_to"]
+    
+    # Now get paths from the latest version
+    latest = await client.get_memory_version(current_id)
+    if latest:
+        return latest.get("paths", [])
+    
+    # Fallback: check original memory_id
+    original = await client.get_memory_version(memory_id)
+    return original.get("paths", []) if original else []
+
+
 async def _diff_path_delete(snapshot: dict, resource_id: str) -> dict:
     """Diff for path deletion. Rollback = restore path.
     
     Old content is fetched from DB via memory_id rather than from the
     snapshot file, leveraging the version chain.
+    Also includes surviving paths so Salem can tell if this is just
+    an alias removal or if the entire memory is being discarded.
     """
     client = get_sqlite_client()
     
@@ -217,10 +249,18 @@ async def _diff_path_delete(snapshot: dict, resource_id: str) -> dict:
             "disclosure": current_memory.get("disclosure")
         }
     
+    # --- Find surviving paths for this memory ---
+    surviving_paths = await _get_surviving_paths(client, old_memory_id)
+    # Exclude the deleted path itself from the list
+    deleted_uri = snapshot["data"].get("uri") or f"{snapshot['data'].get('domain', 'core')}://{snapshot['data'].get('path')}"
+    surviving_paths = [p for p in surviving_paths if p != deleted_uri]
+    
     unified, summary = _compute_diff(snapshot_data["content"], current_data["content"])
     
     if current_data["content"] == "[DELETED]":
         summary = "Deleted (rollback = restore)"
+    
+    current_data["surviving_paths"] = surviving_paths
     
     return {"snapshot_data": snapshot_data, "current_data": current_data,
             "unified": unified, "summary": summary, "has_changes": True}

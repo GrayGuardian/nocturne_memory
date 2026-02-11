@@ -141,6 +141,58 @@ function ReviewPage() {
 
   // --- Render Helpers ---
   
+  // Surviving Paths Renderer (for DELETE operations)
+  const renderSurvivingPaths = () => {
+    if (!selectedSnapshot || selectedSnapshot.operation_type !== 'delete') return null;
+    if (!diffData?.current_data) return null;
+    
+    const survivingPaths = diffData.current_data.surviving_paths;
+    if (survivingPaths === undefined) return null;  // Data not loaded yet
+    
+    const isFullDeletion = survivingPaths.length === 0;
+
+    return (
+      <div className={clsx(
+        "mb-8 p-4 rounded-lg border backdrop-blur-sm",
+        isFullDeletion 
+          ? "bg-rose-950/20 border-rose-800/40" 
+          : "bg-slate-900/40 border-slate-800/60"
+      )}>
+        <h3 className="text-xs font-bold uppercase mb-3 flex items-center gap-2 tracking-widest">
+          {isFullDeletion ? (
+            <>
+              <Trash2 size={12} className="text-rose-500" />
+              <span className="text-rose-400">Memory Fully Orphaned</span>
+            </>
+          ) : (
+            <>
+              <Link2 size={12} className="text-slate-500" />
+              <span className="text-slate-500">Surviving Paths</span>
+            </>
+          )}
+        </h3>
+        
+        {isFullDeletion ? (
+          <p className="text-xs text-rose-300/70">
+            No other paths point to this memory. This deletion removes all access to the content.
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            <p className="text-xs text-slate-500 mb-2">
+              This memory is still reachable via {survivingPaths.length} other path{survivingPaths.length > 1 ? 's' : ''}:
+            </p>
+            {survivingPaths.map((path, idx) => (
+              <div key={idx} className="flex items-center gap-2 text-xs font-mono text-emerald-400/80 bg-emerald-950/20 rounded px-2.5 py-1.5 border border-emerald-900/30">
+                <Link2 size={10} className="text-emerald-600 flex-shrink-0" />
+                <span className="truncate">{path}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Custom Metadata Renderer
   const renderMetadataChanges = () => {
     if (!diffData?.snapshot_data || !diffData?.current_data) return null;
@@ -344,6 +396,7 @@ function ReviewPage() {
                            </div>
 
                            {renderMetadataChanges()}
+                           {renderSurvivingPaths()}
                            
                            {/* The Core Content */}
                            <div className="bg-[#0A0A12]/50 rounded-xl border border-slate-800/50 p-1 min-h-[200px] shadow-2xl relative overflow-hidden">
