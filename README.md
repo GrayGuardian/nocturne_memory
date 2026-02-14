@@ -389,7 +389,8 @@ disclosure = "在什么时候该想起这件事"。
 
 ---
 
-## 🔄 从旧版 (Neo4j) 迁移到 v1.0 (SQLite)
+<details>
+<summary><strong>🔄 从旧版 (Neo4j) 迁移到 v1.0 (SQLite)</strong></summary>
 
 如果你之前使用的是基于 Neo4j 的旧版 Nocturne Memory（1.0 之前的版本），项目内附带了一个迁移脚本，可以将所有数据转移到新的 SQLite 后端。
 
@@ -428,6 +429,8 @@ disclosure = "在什么时候该想起这件事"。
 > **注意**：默认所有记忆迁移到 `core://` 域。如需使用其他域，传入 `--domain writer` 等参数。
 
 每次迁移完成后会生成 `migration_log.json` 详细日志。
+
+</details>
 
 ---
 

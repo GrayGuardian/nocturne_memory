@@ -388,7 +388,8 @@ Writing new memories is eating; organizing old memories is digesting. Periodical
 
 ---
 
-## 🔄 Migrating from Pre-1.0 (Neo4j) to v1.0 (SQLite)
+<details>
+<summary><strong>🔄 Migrating from Pre-1.0 (Neo4j) to v1.0 (SQLite)</strong></summary>
 
 If you were using an older version of Nocturne Memory backed by Neo4j (pre-1.0), a migration script is included to transfer all your data to the new SQLite backend.
 
@@ -427,6 +428,8 @@ If you were using an older version of Nocturne Memory backed by Neo4j (pre-1.0),
 > **Note**: All memories are migrated into the `core://` domain by default. To use a different domain, pass `--domain writer` (or any valid domain).
 
 A detailed log is saved to `migration_log.json` after each run.
+
+</details>
 
 ---
 
