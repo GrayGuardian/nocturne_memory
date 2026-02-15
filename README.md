@@ -6,7 +6,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![Protocol](https://img.shields.io/badge/protocol-MCP-orange.svg)
-![Core](https://img.shields.io/badge/core-SQLite-blue.svg)
+![Core](https://img.shields.io/badge/core-SQLite%20|%20PostgreSQL-blue.svg)
 
 [English Version](README_EN.md)
 
@@ -51,7 +51,8 @@
 
 ## ⚡ 核心架构 (The Architecture)
 
-Nocturne 采用极简的 **SQLite + URI** 架构，拒绝复杂的向量数据库，回归最本质的**结构化语义**。
+Nocturne 采用极简的 **SQLite/PostgreSQL + URI** 架构，拒绝复杂的向量数据库，回归最本质的**结构化语义**。
+默认使用 SQLite（单机本地），也支持 PostgreSQL（远程/多设备共享）。
 整个系统由三个独立组件构成：
 
 <p align="center">
@@ -60,7 +61,7 @@ Nocturne 采用极简的 **SQLite + URI** 架构，拒绝复杂的向量数据�
 
 | 组件 | 技术 | 用途 |
 |------|------|------|
-| **Backend** | Python + FastAPI + SQLite | 数据存储、REST API、快照引擎 |
+| **Backend** | Python + FastAPI + SQLite/PostgreSQL | 数据存储、REST API、快照引擎 |
 | **AI Interface** | MCP Server (stdio / SSE) | AI Agent 读写记忆的接口 |
 | **Human Interface** | React + Vite + TailwindCSS | 人类可视化管理记忆 |
 
@@ -132,13 +133,13 @@ cp .env.example .env
 编辑 `.env`，将 `DATABASE_URL` 中的路径替换为**你机器上的绝对路径**：
 
 ```ini
-# 指向示例数据库（快速体验）
+# SQLite — 本地单机（默认）
 DATABASE_URL=sqlite+aiosqlite:///C:/path/to/nocturne-memory/demo.db
 
-# 指向你自己的数据库（正式使用）
-DATABASE_URL=sqlite+aiosqlite:///C:/path/to/your/agent_memory.db
+# PostgreSQL — 远程/多设备共享
+DATABASE_URL=postgresql+asyncpg://user:password@host:5432/nocturne_memory
 ```
-> ⚠️ **必须使用绝对路径。**
+> ⚠️ **SQLite 必须使用绝对路径。**
 > *   **Linux/Mac**: 在终端运行 `pwd` 获取当前路径。
 > *   **Windows (PowerShell)**: 运行 `Get-Location`。**Windows (CMD)**: 运行 `echo %cd%`。
 > *   相对路径会导致 MCP Server 和 Web 后端读取不同的数据库文件（一个读 A，一个读 B），这是最常见的错误。
