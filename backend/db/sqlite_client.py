@@ -1,10 +1,12 @@
 """
-SQLite Client for Nocturne Memory System
+Database Client for Nocturne Memory System
 
-This module implements the SQLite-based memory storage with:
+This module implements database-agnostic memory storage with:
 - Path-based addressing (mem://path/to/memory)
 - Version control via deprecated flag
 - Multiple paths (aliases) pointing to same memory
+
+Supports both SQLite (local, single-user) and PostgreSQL (remote, multi-device).
 """
 
 import os
@@ -101,7 +103,9 @@ class Path(Base):
 
 class SQLiteClient:
     """
-    Async SQLite client for memory operations.
+    Async database client for memory operations.
+
+    Supports SQLite (local) and PostgreSQL (remote, multi-device).
 
     Core operations:
     - read: Get memory by path
@@ -113,17 +117,40 @@ class SQLiteClient:
 
     def __init__(self, database_url: str):
         """
-        Initialize the SQLite client.
+        Initialize the database client.
 
         Args:
             database_url: SQLAlchemy async URL, e.g.
-                         "sqlite+aiosqlite:///nocturne_memory.db"
+                         SQLite:     "sqlite+aiosqlite:///nocturne_memory.db"
+                         PostgreSQL: "postgresql+asyncpg://user:pass@host:5432/dbname"
         """
         self.database_url = database_url
-        self.engine = create_async_engine(database_url, echo=False)
+        self.db_type = self._detect_database_type(database_url)
+
+        # PostgreSQL benefits from connection pooling; SQLite doesn't need it
+        engine_kwargs = {"echo": False}
+        if self.db_type == "postgresql":
+            engine_kwargs.update({
+                "pool_size": 10,
+                "max_overflow": 20,
+                "pool_recycle": 3600,  # Recycle connections after 1 hour
+                "pool_pre_ping": True,  # Verify connections before using
+            })
+
+        self.engine = create_async_engine(database_url, **engine_kwargs)
         self.async_session = async_sessionmaker(
             self.engine, class_=AsyncSession, expire_on_commit=False
         )
+
+    def _detect_database_type(self, url: str) -> str:
+        """Detect database type from connection URL."""
+        if "postgresql" in url:
+            return "postgresql"
+        elif "sqlite" in url:
+            return "sqlite"
+        else:
+            # Default to sqlite for backward compatibility
+            return "sqlite"
 
     async def init_db(self):
         """Create tables if they don't exist, and run migrations for schema changes."""
@@ -134,12 +161,16 @@ class SQLiteClient:
 
     @staticmethod
     def _migrate_add_migrated_to(connection):
-        """Add migrated_to column to memories table if it doesn't exist."""
+        """Add migrated_to column to memories table if it doesn't exist.
+
+        Uses Python-level check for maximum compatibility with all SQLite versions.
+        """
         from sqlalchemy import inspect, text
 
         inspector = inspect(connection)
         columns = [col["name"] for col in inspector.get_columns("memories")]
         if "migrated_to" not in columns:
+            # Python-level check works with all SQLite/PostgreSQL versions
             connection.execute(
                 text("ALTER TABLE memories ADD COLUMN migrated_to INTEGER")
             )
