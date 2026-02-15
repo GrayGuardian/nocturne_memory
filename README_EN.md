@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![Protocol](https://img.shields.io/badge/protocol-MCP-orange.svg)
-![Core](https://img.shields.io/badge/core-SQLite-blue.svg)
+![Core](https://img.shields.io/badge/core-SQLite%20|%20PostgreSQL-blue.svg)
 
 [中文版](README.md)
 
@@ -50,7 +50,8 @@ Through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), it
 
 ## ⚡ The Architecture
 
-Nocturne adopts a minimalist **SQLite + URI** architecture, rejecting complex vector databases in favor of the most essential **structured semantics**.
+Nocturne adopts a minimalist **SQLite/PostgreSQL + URI** architecture, rejecting complex vector databases in favor of the most essential **structured semantics**.
+SQLite is the default for local single-user setups; PostgreSQL is supported for remote or multi-device access.
 The entire system consists of three independent components:
 
 <p align="center">
@@ -59,7 +60,7 @@ The entire system consists of three independent components:
 
 | Component | Tech Stack | Purpose |
 |-----------|-----------|---------|
-| **Backend** | Python + FastAPI + SQLite | Data storage, REST API, Snapshot engine |
+| **Backend** | Python + FastAPI + SQLite/PostgreSQL | Data storage, REST API, Snapshot engine |
 | **AI Interface** | MCP Server (stdio / SSE) | Interface for AI Agents to read/write memories |
 | **Human Interface** | React + Vite + TailwindCSS | Visual memory management for humans |
 
@@ -131,13 +132,13 @@ cp .env.example .env
 Edit `.env` and replace the path in `DATABASE_URL` with the **absolute path on your machine**:
 
 ```ini
-# Point to the demo database (quick trial)
+# SQLite — local, single-user (default)
 DATABASE_URL=sqlite+aiosqlite:///C:/path/to/nocturne-memory/demo.db
 
-# Point to your own database (production use)
-DATABASE_URL=sqlite+aiosqlite:///C:/path/to/your/agent_memory.db
+# PostgreSQL — remote / multi-device
+DATABASE_URL=postgresql+asyncpg://user:password@host:5432/nocturne_memory
 ```
-> ⚠️ **You must use an absolute path.**
+> ⚠️ **SQLite requires an absolute path.**
 > *   **Linux/Mac**: Run `pwd` in the terminal to get the current path.
 > *   **Windows (PowerShell)**: Run `Get-Location`. **Windows (CMD)**: Run `echo %cd%`.
 > *   Relative paths will cause the MCP Server and Web backend to read different database files (one reads A, the other reads B) — this is the most common mistake.
