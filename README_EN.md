@@ -287,8 +287,16 @@ python backend/run_sse.py
 SSE Endpoint: `http://localhost:8000/sse`
 
 ### Demo Database
-The project ships with `demo.db`, which contains pre-configured example memories (`core://agent`, `core://my_user`).
-Ready to use out of the box — no need to start from scratch.
+
+The project ships with `demo.db`, which contains pre-configured example memories (`core://agent`, `core://my_user`) for a quick first look.
+
+> 🚨 **Warning: `demo.db` is for demo purposes only — do NOT store real data in it!**
+>
+> `demo.db` is a version-controlled file in the Git repository. If you store real memories directly in `demo.db`,
+> running `git pull` to update the project **may overwrite your data with the default version, causing irreversible data loss**.
+>
+> **Before serious use, change `DATABASE_URL` in `.env` to point to your own database file** (e.g., `my_memory.db`),
+> and make sure it is located outside the repository directory or excluded via `.gitignore`.
 
 ---
 

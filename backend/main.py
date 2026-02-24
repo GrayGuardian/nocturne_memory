@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from api import review_router, browse_router, maintenance_router
-from db import get_sqlite_client, close_sqlite_client
+from db import get_db_client, close_db_client
 
 
 @asynccontextmanager
@@ -11,19 +11,19 @@ async def lifespan(app: FastAPI):
     # 启动时
     print("Memory API starting...")
     
-    # Initialize SQLite
+    # Initialize Database
     try:
-        sqlite_client = get_sqlite_client()
-        await sqlite_client.init_db()
-        print("SQLite database initialized.")
+        db_client = get_db_client()
+        await db_client.init_db()
+        print("Database initialized.")
     except Exception as e:
-        print(f"Failed to initialize SQLite: {e}")
+        print(f"Failed to initialize database: {e}")
     
     yield
     
     # 关闭时
     print("Closing database connections...")
-    await close_sqlite_client()
+    await close_db_client()
 
 
 app = FastAPI(

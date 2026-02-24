@@ -24,7 +24,7 @@ from dotenv import load_dotenv, find_dotenv
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server.fastmcp import FastMCP
-from db.sqlite_client import get_sqlite_client
+from db.sqlite_client import get_db_client
 from db.snapshot import get_snapshot_manager
 
 # Load environment variables
@@ -174,7 +174,7 @@ async def _snapshot_memory_content(uri: str) -> bool:
 
     domain, path = parse_uri(uri)
     full_uri = make_uri(domain, path)
-    client = get_sqlite_client()
+    client = get_db_client()
     memory = await client.get_memory_by_path(path, domain)
 
     if not memory:
@@ -226,7 +226,7 @@ async def _snapshot_path_meta(uri: str) -> bool:
         return False
 
     domain, path = parse_uri(uri)
-    client = get_sqlite_client()
+    client = get_db_client()
     memory = await client.get_memory_by_path(path, domain)
 
     if not memory:
@@ -313,7 +313,7 @@ async def _snapshot_path_delete(uri: str) -> bool:
 
     # Capture current state before deletion
     domain, path = parse_uri(uri)
-    client = get_sqlite_client()
+    client = get_db_client()
     memory = await client.get_memory_by_path(path, domain)
 
     if not memory:
@@ -435,7 +435,7 @@ async def _generate_boot_memory_view() -> str:
     Internal helper to generate the system boot memory view.
     (Formerly system://core)
     """
-    client = get_sqlite_client()
+    client = get_db_client()
     results = []
     loaded = 0
     failed = []
@@ -488,7 +488,7 @@ async def _generate_memory_index_view() -> str:
     Internal helper to generate the full memory index.
     (Formerly fiat-lux://index)
     """
-    client = get_sqlite_client()
+    client = get_db_client()
 
     try:
         paths = await client.get_all_paths()
@@ -549,7 +549,7 @@ async def _generate_recent_memories_view(limit: int = 10) -> str:
     Args:
         limit: Maximum number of results to return
     """
-    client = get_sqlite_client()
+    client = get_db_client()
 
     try:
         results = await client.get_recent_memories(limit=limit)
@@ -644,7 +644,7 @@ async def read_memory(uri: str) -> str:
                 return f"Error: Invalid number in URI '{uri}'. Usage: system://recent or system://recent/N (e.g. system://recent/20)"
         return await _generate_recent_memories_view(limit=limit)
 
-    client = get_sqlite_client()
+    client = get_db_client()
 
     try:
         return await _fetch_and_format_memory(client, uri)
@@ -685,7 +685,7 @@ async def create_memory(
         create_memory("core://", "Bluesky usage rules...", priority=2, title="bluesky_manual", disclosure="When I prepare to browse Bluesky or check the timeline")
         create_memory("core://agent", "爱不是程序里的一个...", priority=1, title="love_definition", disclosure="When I start speaking like a tool or parasite")
     """
-    client = get_sqlite_client()
+    client = get_db_client()
 
     try:
         # Validate title if provided
@@ -762,7 +762,7 @@ async def update_memory(
         update_memory("core://agent", append="\\n## New Section\\nNew content...")
         update_memory("writer://chapter_1", priority=5)
     """
-    client = get_sqlite_client()
+    client = get_db_client()
 
     try:
         # Parse URI
@@ -890,7 +890,7 @@ async def delete_memory(uri: str) -> str:
         delete_memory("core://agent/deprecated_belief")
         delete_memory("writer://draft_v1")
     """
-    client = get_sqlite_client()
+    client = get_db_client()
     manager = get_snapshot_manager()
     session_id = get_session_id()
     
@@ -992,7 +992,7 @@ async def add_alias(
     Examples:
         add_alias("core://timeline/2024/05/20", "core://agent/my_user/first_meeting", priority=1, disclosure="When I want to know how we start")
     """
-    client = get_sqlite_client()
+    client = get_db_client()
 
     try:
         new_domain, new_path = parse_uri(new_uri)
@@ -1045,7 +1045,7 @@ async def search_memory(
         search_memory("job")                   # Search all domains
         search_memory("chapter", domain="writer") # Search only writer domain
     """
-    client = get_sqlite_client()
+    client = get_db_client()
 
     try:
         # Validate domain if provided
@@ -1087,7 +1087,7 @@ async def search_memory(
 
 async def startup():
     """Initialize the database on startup."""
-    client = get_sqlite_client()
+    client = get_db_client()
     await client.init_db()
 
 

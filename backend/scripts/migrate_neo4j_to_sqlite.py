@@ -46,7 +46,7 @@ if _dotenv_path:
     load_dotenv(_dotenv_path)
 
 from db.neo4j_client import get_neo4j_client
-from db.sqlite_client import get_sqlite_client, SQLiteClient
+from db.sqlite_client import get_db_client, SQLiteClient
 
 
 class MigrationLogger:
@@ -329,7 +329,7 @@ async def run_migration(domain: str = "core"):
         print(f"[ERROR] Failed to connect to Neo4j: {e}")
         return
     
-    sqlite_client = get_sqlite_client()
+    sqlite_client = get_db_client()
     
     # Initialize SQLite tables
     print("[3/6] Creating SQLite tables...")
