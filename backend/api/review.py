@@ -24,7 +24,7 @@ from models import (
 )
 from .utils import get_text_diff
 from db.snapshot import get_snapshot_manager
-from db.sqlite_client import get_sqlite_client
+from db.sqlite_client import get_db_client
 
 router = APIRouter(prefix="/review", tags=["review"])
 
@@ -117,7 +117,7 @@ def _compute_diff(old_content: str, new_content: str) -> tuple:
 
 async def _get_memory_by_path_from_data(data: dict):
     """Helper: fetch current memory via path/domain stored in snapshot data."""
-    client = get_sqlite_client()
+    client = get_db_client()
     path = data.get("path")
     domain = data.get("domain", "core")
     if not path:
@@ -221,7 +221,7 @@ async def _diff_path_delete(snapshot: dict, resource_id: str) -> dict:
     Also includes surviving paths so the human can tell if this is just
     an alias removal or if the entire memory is being discarded.
     """
-    client = get_sqlite_client()
+    client = get_db_client()
     
     # --- Retrieve old content from DB ---
     old_memory_id = snapshot["data"].get("memory_id")
@@ -312,7 +312,7 @@ async def _diff_memory_content(snapshot: dict, resource_id: str) -> dict:
     is preserved by the version chain).  If the old row was permanently
     deleted, a fallback message is shown instead.
     """
-    client = get_sqlite_client()
+    client = get_db_client()
     
     # --- Retrieve old content from DB instead of snapshot file ---
     old_memory_id = snapshot["data"].get("memory_id")
@@ -431,7 +431,7 @@ async def get_resource_diff(session_id: str, resource_id: str):
 
 async def _rollback_path(data: dict) -> dict:
     """Rollback a path-level operation."""
-    client = get_sqlite_client()
+    client = get_db_client()
     path = data.get("path")
     domain = data.get("domain", "core")
     operation_type = data.get("operation_type")
@@ -498,7 +498,7 @@ async def _rollback_path(data: dict) -> dict:
 
 async def _rollback_memory_content(data: dict) -> dict:
     """Rollback a memory content change."""
-    client = get_sqlite_client()
+    client = get_db_client()
     memory_id = data.get("memory_id")
     path = data.get("path")
     domain = data.get("domain", "core")
@@ -546,7 +546,7 @@ async def _rollback_memory_content(data: dict) -> dict:
 
 async def _rollback_legacy_modify(data: dict) -> dict:
     """Rollback for legacy 'modify' snapshots that combined content + metadata."""
-    client = get_sqlite_client()
+    client = get_db_client()
     path = data.get("path")
     domain = data.get("domain", "core")
     uri = data.get("uri", f"{domain}://{path}")
@@ -729,7 +729,7 @@ async def list_deprecated_memories():
     
     这些是 AI 更新/删除后留下的旧版本，等待 human 审核后永久删除。
     """
-    client = get_sqlite_client()
+    client = get_db_client()
     
     try:
         memories = await client.get_deprecated_memories()
@@ -749,7 +749,7 @@ async def permanently_delete_memory(memory_id: int):
     这是真正的删除操作，不可恢复。
     AI 无法调用此接口（仅限 human 通过前端操作）。
     """
-    client = get_sqlite_client()
+    client = get_db_client()
     
     try:
         await client.permanently_delete_memory(memory_id)

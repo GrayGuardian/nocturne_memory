@@ -1457,25 +1457,25 @@ class SQLiteClient:
 # Global Singleton
 # =============================================================================
 
-_sqlite_client: Optional[SQLiteClient] = None
+_db_client: Optional[SQLiteClient] = None
 
 
-def get_sqlite_client() -> SQLiteClient:
-    """Get the global SQLiteClient instance."""
-    global _sqlite_client
-    if _sqlite_client is None:
+def get_db_client() -> SQLiteClient:
+    """Get the global database client instance."""
+    global _db_client
+    if _db_client is None:
         database_url = os.getenv("DATABASE_URL")
         if not database_url:
             raise ValueError(
                 "DATABASE_URL environment variable is not set. Please check your .env file."
             )
-        _sqlite_client = SQLiteClient(database_url)
-    return _sqlite_client
+        _db_client = SQLiteClient(database_url)
+    return _db_client
 
 
-async def close_sqlite_client():
-    """Close the global SQLiteClient connection."""
-    global _sqlite_client
-    if _sqlite_client:
-        await _sqlite_client.close()
-        _sqlite_client = None
+async def close_db_client():
+    """Close the global database client connection."""
+    global _db_client
+    if _db_client:
+        await _db_client.close()
+        _db_client = None

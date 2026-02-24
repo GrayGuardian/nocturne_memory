@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from db import get_sqlite_client
+from db import get_db_client
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 
@@ -15,7 +15,7 @@ async def get_orphans():
     Includes migration target paths for deprecated memories so the human can see
     where the memory used to live without clicking into each one.
     """
-    client = get_sqlite_client()
+    client = get_db_client()
     return await client.get_all_orphan_memories()
 
 
@@ -25,7 +25,7 @@ async def get_orphan_detail(memory_id: int):
     Get full detail of an orphan memory, including migration target's
     full content for diff comparison.
     """
-    client = get_sqlite_client()
+    client = get_db_client()
     detail = await client.get_orphan_detail(memory_id)
     if not detail:
         raise HTTPException(status_code=404, detail=f"Memory {memory_id} not found")
@@ -41,7 +41,7 @@ async def delete_orphan(memory_id: int):
     Safety: The orphan check (deprecated or path-less) and the deletion
     run inside the same DB transaction, eliminating TOCTOU races.
     """
-    client = get_sqlite_client()
+    client = get_db_client()
     try:
         result = await client.permanently_delete_memory(
             memory_id, require_orphan=True

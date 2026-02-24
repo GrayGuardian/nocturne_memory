@@ -288,8 +288,16 @@ python backend/run_sse.py
 SSE Endpoint: `http://localhost:8000/sse`
 
 ### Demo 数据库
-项目自带 `demo.db`，包含预配置的示例记忆（`core://agent`, `core://my_user`）。
-打开即用，无需从零开始。
+
+项目自带 `demo.db`，包含预配置的示例记忆（`core://agent`, `core://my_user`），可用于快速体验。
+
+> 🚨 **警告：`demo.db` 仅供体验，请勿将其用于存储真实数据！**
+>
+> `demo.db` 是 Git 仓库中的受版本控制文件。如果你直接在 `demo.db` 中存储了真实记忆，
+> 当你执行 `git pull` 更新项目时，**你的数据可能会被仓库中的默认版本覆盖，导致不可逆的数据丢失**。
+>
+> **正式使用前，请务必在 `.env` 中将 `DATABASE_URL` 指向你自己创建的数据库文件**（例如 `my_memory.db`），
+> 并确保该文件位于仓库目录之外、或已被 `.gitignore` 排除。
 
 ---
 

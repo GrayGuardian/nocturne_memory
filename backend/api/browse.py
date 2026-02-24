@@ -7,7 +7,7 @@ hierarchical browser. Every path is just a node with content and children.
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from db import get_sqlite_client
+from db import get_db_client
 from db.sqlite_client import Path as PathModel
 from sqlalchemy import select
 
@@ -33,7 +33,7 @@ async def get_node(
     - Preview of all children (next level)
     - Breadcrumb trail for navigation
     """
-    client = get_sqlite_client()
+    client = get_db_client()
     
     if not path:
         # Virtual Root Node
@@ -118,7 +118,7 @@ async def update_node(
     """
     Update a node's content.
     """
-    client = get_sqlite_client()
+    client = get_db_client()
     
     # Check exists
     memory = await client.get_memory_by_path(path, domain=domain)
